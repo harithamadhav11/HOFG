@@ -1,0 +1,8 @@
+#define MEM_ALLOC 1
+#define MEM_DEALLOC 2
+#define K_COPY 3
+#define U_COPY 4
+#define DEREF 5
+#define LK_DEREF 6
+#define LU_DEREF 7
+#define STORE 8
