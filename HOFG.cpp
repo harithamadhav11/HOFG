@@ -31,26 +31,32 @@ namespace {
         enum vertexType {obj,ptr,snk,oos};
         struct V{
             Value *name;
-            vertexType *type;
+            vertexType vertexTy;
+            bool operator < (const V &other) const {return name < other.name;}
+            bool operator > (const V &other) const {return name > other.name;}
         };
         struct F {
-            V *head;
-            V *tail;
+            V head;
+            V tail;
+            bool operator < (const F &other) const {return head > other.head;}
         };
         struct R {
-            V *head;
-            V *tail;
+            V head;
+            V tail;
+            bool operator < (const R &other) const {return head > other.head;}
         };
         struct D {
-            V *head;
-            V *tail;
+            V head;
+            V tail;
+            bool operator < (const D &other) const {return head > other.head;}
         };
         struct HOFGraph {
             std::set<V> vertices;
             std::set<F> flows;
             std::set<R> derefs;
             std::set<D> derived;
-        };
+           // bool operator < (const HOFGraph &other) const {return vertices < other.vertices;}
+        }HeapOFGraph;
         struct E {
             std::set<F> flows;
             std::set<R> derefs;
@@ -79,34 +85,37 @@ namespace {
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &I(*BI);
                 if(isMallocFunction(I)) {
-                    handleRelevantCodeSegment(MEM_ALLOC, B);                    
+                    //errs()<<"\nReached here... : ";
+                    //I.dump();
+                    handleRelevantCodeSegment(MEM_ALLOC, B, I);                    
                 }
                 if(identifyCopyInstruction(I)) {
-                    handleRelevantCodeSegment(K_COPY, B);
+                    handleRelevantCodeSegment(K_COPY, B, I);
                 }
                 if(identifyLoadInstruction(I)) {
-                    handleRelevantCodeSegment(LK_DEREF,B);
+                    handleRelevantCodeSegment(LK_DEREF,B, I);
                 }
                 if(identifyStoreInstruction(I)) {
-                    handleRelevantCodeSegment(STORE,B);
+                    handleRelevantCodeSegment(STORE,B, I);
                 }
-                handleRelevantCodeSegment(I.getOpcode(), B);
+               // handleRelevantCodeSegment(I.getOpcode(), B);
             }
         }
         bool isMallocFunction(Instruction &I) {
-            if(isa<BitCastInst>(I)) {
-                if(isa<CallInst>(I.getOperand(0))) {
-                    CallInst *call=dyn_cast<CallInst>(I.getOperand(0));
+            //if(isa<BitCastInst>(I)) {
+                if(isa<CallInst>(I)) {
+                    CallInst *call=dyn_cast<CallInst>(&I);
                     Function *F = call->getCalledFunction();
                     if(F->getName() == MALLOC) {
                         return true;
                     }
                 }
-            }
+            //}
+
             return false;
         }
 
-        void identifyCopyInstruction(Instruction &I) {
+        bool identifyCopyInstruction(Instruction &I) {
             //store preceeded by load, for pointer types
             //p=q
             if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
@@ -122,11 +131,11 @@ namespace {
             return false;
         }
 
-        void identifyLoadInstruction(Instruction &I) {
+        bool identifyLoadInstruction(Instruction &I) {
             if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
                 if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
                     if(isa<LoadInst>(storIns->getOperand(1)) && isa<PointerType>(storIns->getOperand(1)->getType())) {
-                        errs()<<"Load of two pointer types\n";
+                        //errs()<<"Load of two pointer types\n";
                         return true;
                     }
                 }
@@ -134,7 +143,7 @@ namespace {
             return false;
         }
 
-        void identifyStoreInstruction(Instruction &I) {
+        bool identifyStoreInstruction(Instruction &I) {
             if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
                 if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
                     Instruction* load1=dyn_cast<Instruction>(storIns->getOperand(0));
@@ -146,46 +155,103 @@ namespace {
             return false;
         }
 
-        void handleRelevantCodeSegment(int option, BasicBlock &B) {
-            errs()<<"\n Reached in handler : "<< B.getName();
+        void handleRelevantCodeSegment(int option, BasicBlock &B, Instruction &I) {
+            //errs()<<"\n Reached in handler : "<< B.getName();
 ///            errs()<<"\n function name: "<< B.getParent()->getName();
             switch (option) {
-                case MEM_ALLOC: errs()<<"\nfound malloc";
+                case MEM_ALLOC: //errs()<<"\nfound malloc";
+                                addMalloc(B,I);
                                 break;
-                case MEM_DEALLOC : errs()<<"\nfound dealloc";
+                case MEM_DEALLOC : //errs()<<"\nfound dealloc";
+                                addDealloc(B,I);
                                 break;
-                case K_COPY : errs()<<"copy into a known pointer";
+                case K_COPY : //errs()<<"copy into a known pointer";
+                                addCopy(B,I);
                                 break;
-                case U_COPY : errs()<<"copy into an unknown pointer";
+                case U_COPY : //errs()<<"copy into an unknown pointer";
+                                addNewCopy(B,I);
                                 break;
-                case DEREF : errs()<<"\n found a dereference";
+                case DEREF : //errs()<<"\n found a dereference";
+                                addDereference(B,I);
                                 break;
-                case LK_DEREF : errs()<<"\nload with known dereference";
+                case LK_DEREF : //errs()<<"\nload with known dereference";
+                                addLoadToKnownDereference(B,I);
                                 break;
-                case LU_DEREF : errs()<<"\nload with unknown dereference";
+                case LU_DEREF : //errs()<<"\nload with unknown dereference";
+                                addLoadToUnknownDereference(B,I);
                                 break;
-                case STORE : errs()<<"\nstore instruction";
+                case STORE : //errs()<<"\nstore instruction";
+                                addStoreToDereference(B,I);
                                 break;
                 default : errs()<<"\ninvalid instruction";
             }
         }
+        void addMalloc(BasicBlock &B, Instruction &I) {
+            //errs()<<"\n Adding malloc into HOFG\n";
+            V objNode,ptrNode;
+            objNode.name=dyn_cast<Value>(&I);
+            objNode.vertexTy=obj;
+            HeapOFGraph.vertices.insert(objNode);
+            for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
+                Instruction &Ins(*BI);
+                if(dyn_cast<Instruction>(Ins.getOperand(0)) == &I) {
+                    if(isa<BitCastInst>(Ins)) {
+                        ptrNode.name=dyn_cast<Value>(&Ins);
+                        ptrNode.vertexTy=ptr;
+                        HeapOFGraph.vertices.insert(objNode);
+                        F flowEdge;
+                        flowEdge.head=ptrNode;
+                        flowEdge.tail=objNode;
+                        HeapOFGraph.flows.insert(flowEdge);
+                    }
+                }
+            }
+
+        }
+        void addDealloc(BasicBlock &B, Instruction &I) {
+            
+        }
+        void addCopy(BasicBlock &B, Instruction &I) {
+
+        }
+        void addNewCopy(BasicBlock &B, Instruction &I) {
+
+        }
+        void addDereference(BasicBlock &B, Instruction &I) {
+
+        }
+        void addLoadToKnownDereference(BasicBlock &B, Instruction &I) {
+
+        }
+        void addLoadToUnknownDereference(BasicBlock &B, Instruction &I) {
+
+        }
+        void addStoreToDereference(BasicBlock &B, Instruction &I) {
+
+        }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
             for (auto &CGI : CallGraph(M)) {
-                errs()<<"\nlooped once";
+            //    errs()<<"\nlooped once";
                 if (const Function *F = CGI.first) {
-                    errs()<<"\n Function name : "<<F->getName();
-                    errs()<<"\n number of references : "<< CGI.second->getNumReferences();
-                    for(auto &Vec : CGI.second->CalledFunctionsVector) {
-                        errs()<<"\n are for Function " <<Vec.second->getFunction()->getName();
-                    }
+            //        errs()<<"\n Function name : "<<F->getName();
+            //        errs()<<"\n number of references : "<< CGI.second->getNumReferences();
+                    //for(auto &Vec : CGI.second->CalledFunctionsVector) 
+                    //errs()<<"\n Called funcitions vector "<< CGI.second->CalledFunctionsVector().size();
+                    //}
+                    //for (CalledFunctionsVector::iterator I = CGI.second->CalledFunctions.begin(); ; ++I) {
+                    //    errs()<<"\nThis works\n";
+                    //}
+                    //for(auto &I : (CGI.second)->CalledFunctionsVector()) {
+                    //    errs()<<"\n reached here";
+                    //}
                 } else {
 
                 }
-                errs()<<"\n.........................................\n";
+            //    errs()<<"\n.........................................\n";
             }
-            errs()<<"\nDumping call graph\n";
-            CallGraph(M).dump();
+            //errs()<<"\nDumping call graph\n";
+            //CallGraph(M).dump();
         }
         void getAnalysisUsage(AnalysisUsage &AU) const override {
           AU.setPreservesAll();
