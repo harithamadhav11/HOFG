@@ -1,3 +1,6 @@
+#define DEBUG_TYPE "hello"
+#define MALLOC "malloc"
+#define FREE "free"
 #define MEM_ALLOC 1
 #define MEM_DEALLOC 2
 #define K_COPY 3

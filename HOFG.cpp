@@ -20,9 +20,6 @@
 #include <cstdlib>
 using namespace llvm;
 
-#define DEBUG_TYPE "hello"
-#define MALLOC "malloc"
-
 namespace {
 	//Hello3 this is for trying out various functions
 	struct HOFG : public ModulePass {
@@ -89,6 +86,9 @@ namespace {
                     //I.dump();
                     handleRelevantCodeSegment(MEM_ALLOC, B, I);                    
                 }
+                if(isFreeFunction(I)) {
+                    handleRelevantCodeSegment(MEM_DEALLOC, B, I);
+                }
                 if(identifyCopyInstruction(I)) {
                     handleRelevantCodeSegment(K_COPY, B, I);
                 }
@@ -97,6 +97,9 @@ namespace {
                 }
                 if(identifyStoreInstruction(I)) {
                     handleRelevantCodeSegment(STORE,B, I);
+                }
+                if(identifyDeallocation(I)) {
+                    handleRelevantCodeSegment(DEREF, B, I);
                 }
                // handleRelevantCodeSegment(I.getOpcode(), B);
             }
@@ -111,7 +114,19 @@ namespace {
                     }
                 }
             //}
+            return false;
+        }
 
+        bool isFreeFunction(Instruction &I) {
+            //if(isa<BitCastInst>(I)) {
+                if(isa<CallInst>(I)) {
+                    CallInst *call=dyn_cast<CallInst>(&I);
+                    Function *F = call->getCalledFunction();
+                    if(F->getName() == FREE) {
+                        return true;
+                    }
+                }
+            //}
             return false;
         }
 
@@ -150,6 +165,16 @@ namespace {
                     if(isa<LoadInst>(load1->getOperand(0)) && isa<PointerType>(load1->getOperand(0)->getType())) {
                         return true;
                     }
+                }
+            }
+            return false;
+        }
+
+        bool identifyDeallocation(Instruction &I) {
+            if(isa<LoadInst>(&I)) {
+                LoadInst *Ins = dyn_cast<LoadInst>(&I);
+                if(isa<PointerType>(Ins->getOperand(0)->getType()) && !isa<GetElementPtrInst>(Ins->getOperand(0))) {
+                    return true;
                 }
             }
             return false;
@@ -195,21 +220,47 @@ namespace {
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &Ins(*BI);
                 if(dyn_cast<Instruction>(Ins.getOperand(0)) == &I) {
-                    if(isa<BitCastInst>(Ins)) {
+                    if(isa<BitCastInst>(Ins)) {//for two level pointers, there can be load statement instead of bitcast befor malloc
                         ptrNode.name=dyn_cast<Value>(&Ins);
                         ptrNode.vertexTy=ptr;
-                        HeapOFGraph.vertices.insert(objNode);
+                        HeapOFGraph.vertices.insert(ptrNode);
                         F flowEdge;
                         flowEdge.head=ptrNode;
                         flowEdge.tail=objNode;
                         HeapOFGraph.flows.insert(flowEdge);
+                        errs()<<"\n Adding flow edge while handling malloc : \n";
+                        Ins.dump();
+                        errs()<<"\n to \n";
+                        I.dump();
+                        errs()<<"...................";
                     }
                 }
             }
-
         }
         void addDealloc(BasicBlock &B, Instruction &I) {
-            
+            V freeNode,ptrNode;
+            freeNode.name=dyn_cast<Value>(&I);
+            freeNode.vertexTy=snk;
+            HeapOFGraph.vertices.insert(freeNode);
+            for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
+                Instruction &Ins(*BI);
+                if(dyn_cast<Instruction>(I.getOperand(0)) == &Ins) {
+                    if(isa<BitCastInst>(Ins)) {//for 2 level pointers, there can be load instead of bitcast as operand of free
+                        ptrNode.name=dyn_cast<Value>(&Ins);
+                        ptrNode.vertexTy=ptr;
+                        HeapOFGraph.vertices.insert(ptrNode);
+                        F flowEdge;
+                        flowEdge.head=ptrNode;
+                        flowEdge.tail=freeNode;
+                        HeapOFGraph.flows.insert(flowEdge);
+                        errs()<<"\n Adding flow edge while handling dealloc : \n";
+                        Ins.dump();
+                        errs()<<"\n to \n";
+                        I.dump();
+                        errs()<<"...................";
+                    }
+                }
+            }
         }
         void addCopy(BasicBlock &B, Instruction &I) {
 
@@ -218,7 +269,17 @@ namespace {
 
         }
         void addDereference(BasicBlock &B, Instruction &I) {
-
+            //errs()<<"\n Dereference instruction handler\n";
+            //I.dump();
+            //errs()<<"...................\n";
+            errs()<<"\nThe instruction is: ";
+            I.dump();
+            errs()<<"\n This is a dereference of : ";
+            LoadInst *ld = dyn_cast<LoadInst>(&I);
+            ld->getOperand(0)->dump();
+            errs()<<"\n...........\n";
+            //To do: If 
+;
         }
         void addLoadToKnownDereference(BasicBlock &B, Instruction &I) {
 
