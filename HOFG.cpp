@@ -63,9 +63,25 @@ namespace {
 	    bool runOnModule(Module &M) override {
             errs()<<"Entered module pass";
             constructHOFG(M);
+            printHOFG();
             traverseCallGraph(M);
             return true;
 	    };
+        void printHOFG() {
+            errs()<<"\nPrinting HOFG : \n";
+            for (F e : HeapOFGraph.flows) {
+                e.tail.name->dump();
+                errs()<<"-->";
+                e.head.name->dump();
+                errs()<<"\n";
+            }
+            for (R e : HeapOFGraph.derefs) {
+
+            }
+            for (D e : HeapOFGraph.derived) {
+
+            }
+        }
         void constructHOFG(Module &M) {
             for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
                 Function &F(*MI);
@@ -148,8 +164,8 @@ namespace {
             //To do: check for load instruction.
             if(isa<LoadInst>(&I)) {
                 if(!isa<GetElementPtrInst>(I.getOperand(0)) && isa<PointerType>(I.getType())) {
-                    errs()<<"\n Load correctly identified \n";
-                    I.dump();
+                    //errs()<<"\n Load correctly identified \n";
+                    //I.dump();
                     return true;
                 }
                 return false;
@@ -158,24 +174,30 @@ namespace {
         }
 
         bool identifyLoadInstruction(Instruction &I) {
-            if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
-                if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
-                    if(isa<LoadInst>(storIns->getOperand(1)) && isa<PointerType>(storIns->getOperand(1)->getType())) {
-                        //errs()<<"Load of two pointer types\n";
-                        return true;
-                    }
-                }
-            }
-            return false;
+        //    if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
+        //        if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
+        //            if(isa<LoadInst>(storIns->getOperand(1)) && isa<PointerType>(storIns->getOperand(1)->getType())) {
+        //                //errs()<<"Load of two pointer types\n";
+        //                return true;
+        //            }
+        //        }
+        //    }
+        //    return false;
         }
 
         bool identifyStoreInstruction(Instruction &I) {
+            //if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
+            //    if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
+            //        Instruction* load1=dyn_cast<Instruction>(storIns->getOperand(0));
+            //        if(isa<LoadInst>(load1->getOperand(0)) && isa<PointerType>(load1->getOperand(0)->getType())) {
+            //            return true;
+            //        }
+            //    }
+            //}
+            //return false;
             if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
-                if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
-                    Instruction* load1=dyn_cast<Instruction>(storIns->getOperand(0));
-                    if(isa<LoadInst>(load1->getOperand(0)) && isa<PointerType>(load1->getOperand(0)->getType())) {
-                        return true;
-                    }
+                if(isa<PointerType>(I.getOperand(0)->getType())) {
+                    return true;
                 }
             }
             return false;
@@ -239,11 +261,11 @@ namespace {
                         flowEdge.head=ptrNode;
                         flowEdge.tail=objNode;
                         HeapOFGraph.flows.insert(flowEdge);
-                        errs()<<"\n Adding flow edge while handling malloc : \n";
-                        I.dump();
-                        errs()<<"\n to \n";
-                        Ins.dump();
-                        errs()<<"...................";
+                        //errs()<<"\n Adding flow edge while handling malloc : \n";
+                        //I.dump();
+                        //errs()<<"\n to \n";
+                        //Ins.dump();
+                        //errs()<<"...................";
                     }
                 }
             }
@@ -264,11 +286,11 @@ namespace {
                         flowEdge.head=ptrNode;
                         flowEdge.tail=freeNode;
                         HeapOFGraph.flows.insert(flowEdge);
-                        errs()<<"\n Adding flow edge while handling dealloc : \n";
-                        Ins.dump();
-                        errs()<<"\n to \n";
-                        I.dump();
-                        errs()<<"...................";
+                        //errs()<<"\n Adding flow edge while handling dealloc : \n";
+                        //Ins.dump();
+                        //errs()<<"\n to \n";
+                        //I.dump();
+                        //errs()<<"...................";
                     }
                 }
             }
@@ -277,19 +299,26 @@ namespace {
             V srcNode, destNode;
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
             srcNode.vertexTy=ptr;
-            if (HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                errs()<<"\n Found as exising vertex!!!";
+            if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
+                //errs()<<"\n Found as exising vertex!!!";
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
-            }
-            destNode.name=dyn_cast<Value>(&I);
-            destNode.vertexTy=ptr;
-            HeapOFGraph.vertices.insert(destNode);
-            F flowEdge;
-            flowEdge.head=srcNode;
-            flowEdge.tail=destNode;
-            HeapOFGraph.flows.insert(flowEdge);
+                destNode.name=dyn_cast<Value>(&I);
+                destNode.vertexTy=ptr;
+                if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
+                    //This is a copy to existing node.
+                    vit=HeapOFGraph.vertices.find(destNode);
+                    destNode = *vit;
+                } else {
+                    HeapOFGraph.vertices.insert(destNode);
+                }
+                F flowEdge;
+                flowEdge.head=srcNode;
+                flowEdge.tail=destNode;
+                HeapOFGraph.flows.insert(flowEdge);
+            } else {
 
+            }
         }
         void addNewCopy(BasicBlock &B, Instruction &I) {
 
