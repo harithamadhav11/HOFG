@@ -54,6 +54,7 @@ namespace {
             std::set<D> derived;
            // bool operator < (const HOFGraph &other) const {return vertices < other.vertices;}
         }HeapOFGraph;
+        std::set<V>::iterator vit;
         struct E {
             std::set<F> flows;
             std::set<R> derefs;
@@ -133,15 +134,25 @@ namespace {
         bool identifyCopyInstruction(Instruction &I) {
             //store preceeded by load, for pointer types
             //p=q
-            if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
-                if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
-                    LoadInst *old = dyn_cast<LoadInst>(storIns->getOperand(0));
-                    if(isa<LoadInst>(old->getOperand(0)) || isa<LoadInst>(storIns->getOperand(1))) {
+            //if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
+            //    if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
+            //        LoadInst *old = dyn_cast<LoadInst>(storIns->getOperand(0));
+            //        if(isa<LoadInst>(old->getOperand(0)) || isa<LoadInst>(storIns->getOperand(1))) {
                         //Not a copy it is either a load or store constraint
-                    } else {
-                        return true;
-                    }
+            //        } else {
+            //            return true;
+            //        }
+            //    }
+            //}
+            //return false;
+            //To do: check for load instruction.
+            if(isa<LoadInst>(&I)) {
+                if(!isa<GetElementPtrInst>(I.getOperand(0)) && isa<PointerType>(I.getType())) {
+                    errs()<<"\n Load correctly identified \n";
+                    I.dump();
+                    return true;
                 }
+                return false;
             }
             return false;
         }
@@ -229,9 +240,9 @@ namespace {
                         flowEdge.tail=objNode;
                         HeapOFGraph.flows.insert(flowEdge);
                         errs()<<"\n Adding flow edge while handling malloc : \n";
-                        Ins.dump();
-                        errs()<<"\n to \n";
                         I.dump();
+                        errs()<<"\n to \n";
+                        Ins.dump();
                         errs()<<"...................";
                     }
                 }
@@ -263,6 +274,21 @@ namespace {
             }
         }
         void addCopy(BasicBlock &B, Instruction &I) {
+            V srcNode, destNode;
+            srcNode.name=dyn_cast<Value>(I.getOperand(0));
+            srcNode.vertexTy=ptr;
+            if (HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
+                errs()<<"\n Found as exising vertex!!!";
+                vit=HeapOFGraph.vertices.find(srcNode);
+                srcNode = *vit;
+            }
+            destNode.name=dyn_cast<Value>(&I);
+            destNode.vertexTy=ptr;
+            HeapOFGraph.vertices.insert(destNode);
+            F flowEdge;
+            flowEdge.head=srcNode;
+            flowEdge.tail=destNode;
+            HeapOFGraph.flows.insert(flowEdge);
 
         }
         void addNewCopy(BasicBlock &B, Instruction &I) {
@@ -272,17 +298,16 @@ namespace {
             //errs()<<"\n Dereference instruction handler\n";
             //I.dump();
             //errs()<<"...................\n";
-            errs()<<"\nThe instruction is: ";
-            I.dump();
-            errs()<<"\n This is a dereference of : ";
-            LoadInst *ld = dyn_cast<LoadInst>(&I);
-            ld->getOperand(0)->dump();
-            errs()<<"\n...........\n";
+            //errs()<<"\nThe instruction is: ";
+            //I.dump();
+            //errs()<<"\n This is a dereference of : ";
+            //LoadInst *ld = dyn_cast<LoadInst>(&I);
+            //ld->getOperand(0)->dump();
+            //errs()<<"\n...........\n";
             //To do: If 
-;
         }
         void addLoadToKnownDereference(BasicBlock &B, Instruction &I) {
-
+            
         }
         void addLoadToUnknownDereference(BasicBlock &B, Instruction &I) {
 
@@ -292,9 +317,9 @@ namespace {
         }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
-            for (auto &CGI : CallGraph(M)) {
+            //for (auto &CGI : CallGraph(M)) {
             //    errs()<<"\nlooped once";
-                if (const Function *F = CGI.first) {
+            //    if (const Function *F = CGI.first) {
             //        errs()<<"\n Function name : "<<F->getName();
             //        errs()<<"\n number of references : "<< CGI.second->getNumReferences();
                     //for(auto &Vec : CGI.second->CalledFunctionsVector) 
@@ -306,11 +331,11 @@ namespace {
                     //for(auto &I : (CGI.second)->CalledFunctionsVector()) {
                     //    errs()<<"\n reached here";
                     //}
-                } else {
+            //    } else {
 
-                }
+            //    }
             //    errs()<<"\n.........................................\n";
-            }
+            //}
             //errs()<<"\nDumping call graph\n";
             //CallGraph(M).dump();
         }
