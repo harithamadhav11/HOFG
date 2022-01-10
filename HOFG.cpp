@@ -31,28 +31,36 @@ namespace {
             vertexType vertexTy;
             bool operator < (const V &other) const {return name < other.name;}
             bool operator > (const V &other) const {return name > other.name;}
+            bool operator == (const V &other) const {return (name == other.name);}
         };
         struct F {
             V head;
             V tail;
-            bool operator < (const F &other) const {return head > other.head;}
+            bool operator < (const F &other) const {return ((head < other.head) && (tail < other.tail));}
+            bool operator > (const F &other) const {return ((head > other.head) && (tail > other.tail));}
+            bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
         };
         struct R {
             V head;
             V tail;
-            bool operator < (const R &other) const {return head > other.head;}
+            bool operator < (const R &other) const {return ((head < other.head) && (tail < other.tail));}
+            bool operator > (const R &other) const {return ((head > other.head) && (tail > other.tail));}
+            bool operator == (const R &other) const {return ((head == other.head) && (tail == other.tail));}
         };
         struct D {
             V head;
             V tail;
-            bool operator < (const D &other) const {return head > other.head;}
+            bool operator < (const D &other) const {return ((head < other.head) && (tail < other.tail));}
+            bool operator > (const D &other) const {return ((head > other.head) && (tail > other.tail));}
+            bool operator == (const D &other) const {return ((head == other.head) && (tail == other.tail));}
         };
         struct HOFGraph {
             std::set<V> vertices;
             std::set<F> flows;
             std::set<R> derefs;
             std::set<D> derived;
-           // bool operator < (const HOFGraph &other) const {return vertices < other.vertices;}
+            bool operator == (const HOFGraph &other) const {return ((vertices == other.vertices)
+            &&(flows == other.flows) && (derefs == other.derefs) && (derived == other.derived));}
         }HeapOFGraph;
         std::set<V>::iterator vit;
         struct E {
@@ -62,7 +70,12 @@ namespace {
         };
 	    bool runOnModule(Module &M) override {
             errs()<<"Entered module pass";
-            constructHOFG(M);
+            HOFGraph P;
+            do {
+                errs()<<"\n ///////////////////////////////////////////////////////////// \n";
+                P=HeapOFGraph;
+                constructHOFG(M);
+            } while (! (HeapOFGraph == P));
             printHOFG();
             traverseCallGraph(M);
             return true;
@@ -117,6 +130,9 @@ namespace {
                 }
                 if(identifyDeallocation(I)) {
                     handleRelevantCodeSegment(DEREF, B, I);
+                }
+                if(isa<PHINode>(I)) {
+                    handleRelevantCodeSegment(PHI_COPY, B, I);
                 }
                // handleRelevantCodeSegment(I.getOpcode(), B);
             }
@@ -241,6 +257,8 @@ namespace {
                 case STORE : //errs()<<"\nstore instruction";
                                 addStoreToDereference(B,I);
                                 break;
+                case PHI_COPY : addPhiInstruction(B,I);
+                                break;
                 default : errs()<<"\ninvalid instruction";
             }
         }
@@ -320,6 +338,21 @@ namespace {
 
             }
         }
+        void addPhiInstruction(BasicBlock &B, Instruction &I) {
+            PHINode *Phi = dyn_cast<PHINode>(&I);
+            errs()<<"\n Processing phi instruction \n";
+            //errs()<<Phi->getNumIncomingValues()<<"...\n";
+            int l=Phi->getNumIncomingValues();
+            for (int i=0; i<l; i++) {
+               Phi->getIncomingValue(i)->dump();
+//               errs()<<"\n ......\n";
+                V srcNode, destNode;
+                srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
+                if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
+                    errs()<<"\n Found an existing node !!! \n";
+                }
+            }
+        }
         void addNewCopy(BasicBlock &B, Instruction &I) {
 
         }
@@ -342,7 +375,34 @@ namespace {
 
         }
         void addStoreToDereference(BasicBlock &B, Instruction &I) {
-
+            StoreInst *storIns = dyn_cast<StoreInst>(&I);
+            V srcNode, destNode;
+            srcNode.name=dyn_cast<Value>(storIns->getOperand(0));
+            if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
+                errs()<<"\n Store from existing value.................................. \n";
+                vit=HeapOFGraph.vertices.find(srcNode);
+                srcNode = *vit;
+                srcNode.name->dump();
+                errs()<<"................";
+                storIns->getOperand(1)->dump();
+                destNode.name=dyn_cast<Value>(storIns->getOperand(1));
+                destNode.vertexTy=ptr;
+                if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
+                    //This is a store to existing node.
+                    vit=HeapOFGraph.vertices.find(destNode);
+                    destNode = *vit;
+                } else {
+                    errs()<<"And it came here to add vertices";
+                    HeapOFGraph.vertices.insert(destNode);
+                }
+                F flowEdge;
+                flowEdge.head=srcNode;
+                flowEdge.tail=destNode;
+                errs()<<HeapOFGraph.flows.size() << "........ to .......";
+                HeapOFGraph.flows.insert(flowEdge);
+                errs()<<HeapOFGraph.flows.size() << ".......................";
+                printHOFG();
+            }
         }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
