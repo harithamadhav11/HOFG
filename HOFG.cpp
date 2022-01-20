@@ -10,6 +10,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/IR/Attributes.h"
 #include "llvm/Pass.h"
 #include <llvm/ADT/DepthFirstIterator.h>
 #include <llvm/ADT/BreadthFirstIterator.h>
@@ -26,6 +27,7 @@ namespace {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
         enum vertexType {obj,ptr,snk,oos};
+        enum funcType {allocator,deallocator,alldeall};
         struct V{
             Value *name;
             vertexType vertexTy;
@@ -36,22 +38,22 @@ namespace {
         struct F {
             V head;
             V tail;
-            bool operator < (const F &other) const {return ((head < other.head) && (tail < other.tail));}
-            bool operator > (const F &other) const {return ((head > other.head) && (tail > other.tail));}
+            bool operator < (const F &other) const {return ((head < other.head) || (tail < other.tail));}
+            bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
         };
         struct R {
             V head;
             V tail;
-            bool operator < (const R &other) const {return ((head < other.head) && (tail < other.tail));}
-            bool operator > (const R &other) const {return ((head > other.head) && (tail > other.tail));}
+            bool operator < (const R &other) const {return ((head < other.head) || (tail < other.tail));}
+            bool operator > (const R &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const R &other) const {return ((head == other.head) && (tail == other.tail));}
         };
         struct D {
             V head;
             V tail;
-            bool operator < (const D &other) const {return ((head < other.head) && (tail < other.tail));}
-            bool operator > (const D &other) const {return ((head > other.head) && (tail > other.tail));}
+            bool operator < (const D &other) const {return ((head < other.head) || (tail < other.tail));}
+            bool operator > (const D &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const D &other) const {return ((head == other.head) && (tail == other.tail));}
         };
         struct HOFGraph {
@@ -62,6 +64,10 @@ namespace {
             bool operator == (const HOFGraph &other) const {return ((vertices == other.vertices)
             &&(flows == other.flows) && (derefs == other.derefs) && (derived == other.derived));}
         }HeapOFGraph;
+        struct FuncSummary {
+            Value funcName;
+            std::list<funcType> args;
+        };
         std::set<V>::iterator vit;
         struct E {
             std::set<F> flows;
@@ -70,13 +76,20 @@ namespace {
         };
 	    bool runOnModule(Module &M) override {
             errs()<<"Entered module pass";
+            generateSummary(M);
             HOFGraph P;
             do {
                 errs()<<"\n ///////////////////////////////////////////////////////////// \n";
                 P=HeapOFGraph;
                 constructHOFG(M);
+            //    errs()<<".........................................................";
+            //    printHOFG();
+            //    errs()<<".........................................................";
             } while (! (HeapOFGraph == P));
+            //P=HeapOFGraph;
+            //constructHOFG(M);
             printHOFG();
+            
             traverseCallGraph(M);
             return true;
 	    };
@@ -99,6 +112,29 @@ namespace {
             for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
                 Function &F(*MI);
                 constructHOFGfun(F);
+            }
+        }
+        void generateSummary(Module &M) {
+            for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
+                Function &F(*MI);
+                generateFunctionSummary(F);
+            }
+        }
+        void generateFunctionSummary(Function &F) {
+            errs()<<"\nArguments of function : "<<F.getName()<<"\n";
+            if(F.hasLazyArguments()){
+                errs()<<"\n This function has lazy arguments";
+            }
+            int argInx=0;
+            for (auto& A : F.args()) {
+                A.dump();
+                if(A.hasName()) {
+                    Value *argValue = dyn_cast<Value>(F.getArg(argInx));
+                    if(isa<PointerType>(argValue->getType())) {
+                        
+                    }
+                }
+                argInx++;
             }
         }
         void constructHOFGfun(Function &F) {
@@ -202,15 +238,6 @@ namespace {
         }
 
         bool identifyStoreInstruction(Instruction &I) {
-            //if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
-            //    if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
-            //        Instruction* load1=dyn_cast<Instruction>(storIns->getOperand(0));
-            //        if(isa<LoadInst>(load1->getOperand(0)) && isa<PointerType>(load1->getOperand(0)->getType())) {
-            //            return true;
-            //        }
-            //    }
-            //}
-            //return false;
             if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
                 if(isa<PointerType>(I.getOperand(0)->getType())) {
                     return true;
@@ -220,12 +247,12 @@ namespace {
         }
 
         bool identifyDeallocation(Instruction &I) {
-            if(isa<LoadInst>(&I)) {
-                LoadInst *Ins = dyn_cast<LoadInst>(&I);
-                if(isa<PointerType>(Ins->getOperand(0)->getType()) && !isa<GetElementPtrInst>(Ins->getOperand(0))) {
-                    return true;
-                }
-            }
+            //if(isa<LoadInst>(&I)) {
+            //    LoadInst *Ins = dyn_cast<LoadInst>(&I);
+            //    if(isa<PointerType>(Ins->getOperand(0)->getType()) && !isa<GetElementPtrInst>(Ins->getOperand(0))) {
+            //        return true;
+            //    }
+            //}
             return false;
         }
 
@@ -289,21 +316,45 @@ namespace {
             }
         }
         void addDealloc(BasicBlock &B, Instruction &I) {
+            errs()<<"\n It detected a free call\n";
             V freeNode,ptrNode;
             freeNode.name=dyn_cast<Value>(&I);
             freeNode.vertexTy=snk;
-            HeapOFGraph.vertices.insert(freeNode);
+            if (HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) { 
+                errs()<<"its also here already ... but how!!!!";
+                vit=HeapOFGraph.vertices.find(freeNode);
+                freeNode = *vit;
+                freeNode.name->dump();
+            } else {
+                if(! (HeapOFGraph.vertices.insert(freeNode).second)) {
+                    errs()<<"\nHere is the real culprit";
+                }
+            }
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &Ins(*BI);
                 if(dyn_cast<Instruction>(I.getOperand(0)) == &Ins) {
                     if(isa<BitCastInst>(Ins)) {//for 2 level pointers, there can be load instead of bitcast as operand of free
+                        errs()<<"\n It reached in a bitcast detection \n";
                         ptrNode.name=dyn_cast<Value>(&Ins);
+                        ptrNode.name->dump();
                         ptrNode.vertexTy=ptr;
-                        HeapOFGraph.vertices.insert(ptrNode);
+                        if (HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
+                            errs()<<"It is already there in here";
+                            vit=HeapOFGraph.vertices.find(ptrNode);
+                            ptrNode = *vit;
+                            errs()<<"\n and it is : \n";
+                            ptrNode.name->dump();
+                        } else {
+                            if(! HeapOFGraph.vertices.insert(ptrNode).second) {
+                                errs()<<"\n now it is totaly wrong";
+                            }
+                        }
                         F flowEdge;
-                        flowEdge.head=ptrNode;
-                        flowEdge.tail=freeNode;
-                        HeapOFGraph.flows.insert(flowEdge);
+                        flowEdge.tail=ptrNode;
+                        flowEdge.head=freeNode;
+                        if (! (HeapOFGraph.flows.insert(flowEdge).second)) {
+                            errs()<<"Here it didnt work";
+                        }
                         //errs()<<"\n Adding flow edge while handling dealloc : \n";
                         //Ins.dump();
                         //errs()<<"\n to \n";
@@ -318,15 +369,15 @@ namespace {
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
             srcNode.vertexTy=ptr;
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                //errs()<<"\n Found as exising vertex!!!";
+                errs()<<"\n Found as exising vertex!!!";
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(&I);
                 destNode.vertexTy=ptr;
                 if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
                     //This is a copy to existing node.
-                    vit=HeapOFGraph.vertices.find(destNode);
-                    destNode = *vit;
+                //    vit=HeapOFGraph.vertices.find(destNode);
+                //    destNode = *vit;
                 } else {
                     HeapOFGraph.vertices.insert(destNode);
                 }
@@ -340,16 +391,16 @@ namespace {
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
             PHINode *Phi = dyn_cast<PHINode>(&I);
-            errs()<<"\n Processing phi instruction \n";
+            //errs()<<"\n Processing phi instruction \n";
             //errs()<<Phi->getNumIncomingValues()<<"...\n";
             int l=Phi->getNumIncomingValues();
             for (int i=0; i<l; i++) {
-               Phi->getIncomingValue(i)->dump();
+               //Phi->getIncomingValue(i)->dump();
 //               errs()<<"\n ......\n";
                 V srcNode, destNode;
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
                 if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                    errs()<<"\n Found an existing node !!! \n";
+                //    errs()<<"\n Found an existing node !!! \n";
                 }
             }
         }
@@ -379,12 +430,8 @@ namespace {
             V srcNode, destNode;
             srcNode.name=dyn_cast<Value>(storIns->getOperand(0));
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                errs()<<"\n Store from existing value.................................. \n";
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
-                srcNode.name->dump();
-                errs()<<"................";
-                storIns->getOperand(1)->dump();
                 destNode.name=dyn_cast<Value>(storIns->getOperand(1));
                 destNode.vertexTy=ptr;
                 if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
@@ -392,16 +439,12 @@ namespace {
                     vit=HeapOFGraph.vertices.find(destNode);
                     destNode = *vit;
                 } else {
-                    errs()<<"And it came here to add vertices";
                     HeapOFGraph.vertices.insert(destNode);
                 }
                 F flowEdge;
-                flowEdge.head=srcNode;
-                flowEdge.tail=destNode;
-                errs()<<HeapOFGraph.flows.size() << "........ to .......";
+                flowEdge.tail=srcNode;
+                flowEdge.head=destNode;
                 HeapOFGraph.flows.insert(flowEdge);
-                errs()<<HeapOFGraph.flows.size() << ".......................";
-                printHOFG();
             }
         }
         void traverseCallGraph(Module &M) {
