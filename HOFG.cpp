@@ -76,7 +76,7 @@ namespace {
         };
 	    bool runOnModule(Module &M) override {
             errs()<<"Entered module pass";
-            generateSummary(M);
+            
             HOFGraph P;
             do {
                 errs()<<"\n ///////////////////////////////////////////////////////////// \n";
@@ -88,6 +88,7 @@ namespace {
             } while (! (HeapOFGraph == P));
             //P=HeapOFGraph;
             //constructHOFG(M);
+            generateSummary(M);
             printHOFG();
             
             traverseCallGraph(M);
@@ -127,11 +128,19 @@ namespace {
             }
             int argInx=0;
             for (auto& A : F.args()) {
-                A.dump();
+                //A.dump();
                 if(A.hasName()) {
                     Value *argValue = dyn_cast<Value>(F.getArg(argInx));
                     if(isa<PointerType>(argValue->getType())) {
-                        
+                        V argNode;
+                        argNode.name=argValue;
+                        errs()<<"\n showing the argument : ";
+                        argValue->dump();
+                        //argNode.vertexTy=obj;
+
+                        if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
+                            errs()<<"\n It in here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!1";
+                        }
                     }
                 }
                 argInx++;
@@ -293,14 +302,16 @@ namespace {
             //errs()<<"\n Adding malloc into HOFG\n";
             V objNode,ptrNode;
             objNode.name=dyn_cast<Value>(&I);
+            objNode.name->dump();
             objNode.vertexTy=obj;
-            HeapOFGraph.vertices.insert(objNode);
+            //HeapOFGraph.vertices.insert(objNode);
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &Ins(*BI);
                 if(dyn_cast<Instruction>(Ins.getOperand(0)) == &I) {
                     if(isa<BitCastInst>(Ins)) {//for two level pointers, there can be load statement instead of bitcast befor malloc
                         ptrNode.name=dyn_cast<Value>(&Ins);
                         ptrNode.vertexTy=ptr;
+                        HeapOFGraph.vertices.insert(objNode);
                         HeapOFGraph.vertices.insert(ptrNode);
                         F flowEdge;
                         flowEdge.head=ptrNode;
@@ -311,55 +322,67 @@ namespace {
                         //errs()<<"\n to \n";
                         //Ins.dump();
                         //errs()<<"...................";
+                    } else if (isa<LoadInst>(Ins)) {
+                        //To be handled for two level pointers
+                    } else if (isa<StoreInst>(Ins)) {
+                        errs()<<"\n detected store \n";
+                        ptrNode.name=dyn_cast<Value>(Ins.getOperand(1));
+                        if(HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
+                            errs()<<"\n Its already here ...";
+                            ptrNode.name->dump();
+                        }
                     }
                 }
             }
         }
         void addDealloc(BasicBlock &B, Instruction &I) {
-            errs()<<"\n It detected a free call\n";
             V freeNode,ptrNode;
             freeNode.name=dyn_cast<Value>(&I);
             freeNode.vertexTy=snk;
-            if (HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) { 
-                errs()<<"its also here already ... but how!!!!";
+            if (HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
                 vit=HeapOFGraph.vertices.find(freeNode);
                 freeNode = *vit;
-                freeNode.name->dump();
+                //freeNode.name->dump();
             } else {
                 if(! (HeapOFGraph.vertices.insert(freeNode).second)) {
-                    errs()<<"\nHere is the real culprit";
+                    //errs()<<"\nHere is the real culprit";
                 }
             }
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &Ins(*BI);
                 if(dyn_cast<Instruction>(I.getOperand(0)) == &Ins) {
                     if(isa<BitCastInst>(Ins)) {//for 2 level pointers, there can be load instead of bitcast as operand of free
-                        errs()<<"\n It reached in a bitcast detection \n";
+                        //errs()<<"\n It reached in a bitcast detection \n";
                         ptrNode.name=dyn_cast<Value>(&Ins);
-                        ptrNode.name->dump();
+                        //ptrNode.name->dump();
                         ptrNode.vertexTy=ptr;
                         if (HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
-                            errs()<<"It is already there in here";
+                            //errs()<<"It is already there in here";
                             vit=HeapOFGraph.vertices.find(ptrNode);
                             ptrNode = *vit;
-                            errs()<<"\n and it is : \n";
-                            ptrNode.name->dump();
+                            //errs()<<"\n and it is : \n";
+                            //ptrNode.name->dump();
                         } else {
                             if(! HeapOFGraph.vertices.insert(ptrNode).second) {
-                                errs()<<"\n now it is totaly wrong";
+                                //errs()<<"\n now it is totaly wrong";
                             }
                         }
                         F flowEdge;
                         flowEdge.tail=ptrNode;
                         flowEdge.head=freeNode;
                         if (! (HeapOFGraph.flows.insert(flowEdge).second)) {
-                            errs()<<"Here it didnt work";
+                            //errs()<<"Here it didnt work";
                         }
                         //errs()<<"\n Adding flow edge while handling dealloc : \n";
                         //Ins.dump();
                         //errs()<<"\n to \n";
                         //I.dump();
                         //errs()<<"...................";
+                    } else if (isa<LoadInst>(Ins)) {
+                        //errs()<<"Its here : ";
+                        //Ins.dump();
+                        //Ins.getOperand(0)->dump();
+                        //To be handled for two level pointers
                     }
                 }
             }
@@ -391,16 +414,16 @@ namespace {
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
             PHINode *Phi = dyn_cast<PHINode>(&I);
-            //errs()<<"\n Processing phi instruction \n";
+            errs()<<"\n Processing phi instruction \n";
             //errs()<<Phi->getNumIncomingValues()<<"...\n";
             int l=Phi->getNumIncomingValues();
             for (int i=0; i<l; i++) {
-               //Phi->getIncomingValue(i)->dump();
+               Phi->getIncomingValue(i)->dump();
 //               errs()<<"\n ......\n";
                 V srcNode, destNode;
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
                 if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                //    errs()<<"\n Found an existing node !!! \n";
+                    errs()<<"\n Found an existing node !!! \n";
                 }
             }
         }
