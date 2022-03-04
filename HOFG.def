@@ -10,3 +10,4 @@
 #define LU_DEREF 7
 #define STORE 8
 #define PHI_COPY 9
+#define FUNC_CALL 10

@@ -1,5 +1,7 @@
 //===- HOFG.cpp - Code for generating HOFG ---------------===//
-//
+// The code flow is planned as:
+// Iterate on funcitons : from runOnModule pass
+// 
 //
 
 #include "llvm/ADT/Statistic.h"
@@ -26,7 +28,7 @@ namespace {
 	struct HOFG : public ModulePass {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
-        enum vertexType {obj,ptr,snk,oos};
+        enum vertexType {obj,ptr,snk,oos}; //obj: new heap object, ptr: pointer, snk: free statement; oos: out of scope
         enum funcType {allocator,deallocator,alldeall};
         struct V{
             Value *name;
@@ -74,27 +76,26 @@ namespace {
             std::set<R> derefs;
             std::set<D> derived;
         };
-	    bool runOnModule(Module &M) override {
+	    bool runOnModule(Module &M) override {//Module pass
             errs()<<"Entered module pass";
             
-            HOFGraph P;
-            do {
-                errs()<<"\n ///////////////////////////////////////////////////////////// \n";
-                P=HeapOFGraph;
-                constructHOFG(M);
+            //HOFGraph P;
+            //do { // loop until no change in HOFG
+            //    errs()<<"\n ///////////////////////////////////////////////////////////// \n";
+            //    P=HeapOFGraph;
+            //    constructHOFG(M);
             //    errs()<<".........................................................";
             //    printHOFG();
             //    errs()<<".........................................................";
-            } while (! (HeapOFGraph == P));
+            //} while (! (HeapOFGraph == P));
             //P=HeapOFGraph;
             //constructHOFG(M);
-            generateSummary(M);
+            generateSummary(M); //Starting point
             printHOFG();
-            
-            traverseCallGraph(M);
+            //traverseCallGraph(M);
             return true;
 	    };
-        void printHOFG() {
+        void printHOFG() { //To print generated HOFG
             errs()<<"\nPrinting HOFG : \n";
             for (F e : HeapOFGraph.flows) {
                 e.tail.name->dump();
@@ -118,14 +119,11 @@ namespace {
         void generateSummary(Module &M) {
             for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
                 Function &F(*MI);
-                generateFunctionSummary(F);
+                generateFunctionSummary(F); //Generate function summary
             }
         }
-        void generateFunctionSummary(Function &F) {
-            errs()<<"\nArguments of function : "<<F.getName()<<"\n";
-            if(F.hasLazyArguments()){
-                errs()<<"\n This function has lazy arguments";
-            }
+        void generateFunctionSummary(Function &F) { //generate HOFG of the function
+            
             int argInx=0;
             for (auto& A : F.args()) {
                 //A.dump();
@@ -146,14 +144,14 @@ namespace {
                 argInx++;
             }
         }
-        void constructHOFGfun(Function &F) {
+        void constructHOFGfun(Function &F) { 
             for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
                 BasicBlock &B(*FI);
                 idRelevantCodeSegment(B);
             }
         }
 
-        void idRelevantCodeSegment(BasicBlock &B) {
+        void idRelevantCodeSegment(BasicBlock &B) {//Detects the relevent code segment that needs action in the algorithm
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &I(*BI);
                 if(isMallocFunction(I)) {
@@ -178,6 +176,9 @@ namespace {
                 }
                 if(isa<PHINode>(I)) {
                     handleRelevantCodeSegment(PHI_COPY, B, I);
+                }
+                if(identifyFunctionCall(I)) {
+                    handleRelevantCodeSegment(FUNC_CALL, B, I);
                 }
                // handleRelevantCodeSegment(I.getOpcode(), B);
             }
@@ -265,7 +266,7 @@ namespace {
             return false;
         }
 
-        void handleRelevantCodeSegment(int option, BasicBlock &B, Instruction &I) {
+        void handleRelevantCodeSegment(int option, BasicBlock &B, Instruction &I) { //case handler of code segments that are relevent to algorithm
             //errs()<<"\n Reached in handler : "<< B.getName();
 ///            errs()<<"\n function name: "<< B.getParent()->getName();
             switch (option) {
