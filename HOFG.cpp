@@ -1,8 +1,15 @@
 //===- HOFG.cpp - Code for generating HOFG ---------------===//
 // The code flow is planned as:
-// Iterate on funcitons : from runOnModule pass
-// 
-//
+// Iterate on functions : from runOnModule pass
+/*
+Starts with function: generateSummary(Module M)
+    generates summary for each function with constructHOFGfun(Function F):
+    when a call statement in a function occurs:
+        applyFunctionSummary handles it:
+            if the called function does not already have a summary:
+                generateFunctionSummary handles it and applies the summary to call site.
+
+*/
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Module.h"
