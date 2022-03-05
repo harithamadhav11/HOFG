@@ -33,9 +33,10 @@ namespace {
         struct V{
             Value *name;
             vertexType vertexTy;
+            int summaryRef; // To enable ssa for each summary application;
             bool operator < (const V &other) const {return name < other.name;}
             bool operator > (const V &other) const {return name > other.name;}
-            bool operator == (const V &other) const {return (name == other.name);}
+            bool operator == (const V &other) const {return ((name == other.name) && (summaryRef==other.summaryRef));}
         };
         struct F {
             V head;
@@ -110,20 +111,23 @@ namespace {
 
             }
         }
-        void constructHOFG(Module &M) {
-            for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
-                Function &F(*MI);
+        void constructHOFG(Function &F) {
+            //for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
+            //    Function &F(*MI);
                 constructHOFGfun(F);
-            }
+            //}
         }
         void generateSummary(Module &M) {
             for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
                 Function &F(*MI);
-                generateFunctionSummary(F); //Generate function summary
+                constructHOFGfun(F); //Generate function summary
+                LLVMContext& C=F.getContext();
+                MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
+                F.setMetadata("summary",N);
             }
         }
         void generateFunctionSummary(Function &F) { //generate HOFG of the function
-            
+            constructHOFGfun(F);
             int argInx=0;
             for (auto& A : F.args()) {
                 //A.dump();
@@ -189,6 +193,18 @@ namespace {
                     CallInst *call=dyn_cast<CallInst>(&I);
                     Function *F = call->getCalledFunction();
                     if(F->getName() == MALLOC) {
+                        return true;
+                    }
+                }
+            //}
+            return false;
+        }
+        bool identifyFunctionCall(Instruction &I) {
+            //if(isa<BitCastInst>(I)) {
+                if(isa<CallInst>(I)) {
+                    CallInst *call=dyn_cast<CallInst>(&I);
+                    Function *F = call->getCalledFunction();
+                    if(! F->isDeclaration()) {
                         return true;
                     }
                 }
@@ -296,6 +312,8 @@ namespace {
                                 break;
                 case PHI_COPY : addPhiInstruction(B,I);
                                 break;
+                case FUNC_CALL : applyFunctionSummary(B,I);
+                                break;
                 default : errs()<<"\ninvalid instruction";
             }
         }
@@ -303,7 +321,7 @@ namespace {
             //errs()<<"\n Adding malloc into HOFG\n";
             V objNode,ptrNode;
             objNode.name=dyn_cast<Value>(&I);
-            objNode.name->dump();
+            //objNode.name->dump();
             objNode.vertexTy=obj;
             //HeapOFGraph.vertices.insert(objNode);
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
@@ -469,6 +487,15 @@ namespace {
                 flowEdge.tail=srcNode;
                 flowEdge.head=destNode;
                 HeapOFGraph.flows.insert(flowEdge);
+            }
+        }
+        void applyFunctionSummary(BasicBlock &B, Instruction &I) {
+            CallInst *call=dyn_cast<CallInst>(&I);
+            Function *F = call->getCalledFunction();
+            if(F.hasMetadata("summary")) {
+
+            } else {
+                generateFunctionSummary(F);
             }
         }
         void traverseCallGraph(Module &M) {
