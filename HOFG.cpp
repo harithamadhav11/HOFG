@@ -436,8 +436,8 @@ namespace {
                     HeapOFGraph.vertices.insert(destNode);
                 }
                 F flowEdge;
-                flowEdge.head=srcNode;
-                flowEdge.tail=destNode;
+                flowEdge.head=destNode;
+                flowEdge.tail=srcNode;
                 HeapOFGraph.flows.insert(flowEdge);
             } else {
 
