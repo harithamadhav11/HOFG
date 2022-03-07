@@ -297,13 +297,13 @@ namespace {
 ///            errs()<<"\n function name: "<< B.getParent()->getName();
             switch (option) {
                 case MEM_ALLOC: //errs()<<"\nfound malloc";
-                                addMalloc(B,I);
+                                addMalloc(B,I); //implemented
                                 break;
                 case MEM_DEALLOC : //errs()<<"\nfound dealloc";
-                                addDealloc(B,I);
+                                addDealloc(B,I); //implemented
                                 break;
                 case K_COPY : //errs()<<"copy into a known pointer";
-                                addCopy(B,I);
+                                addCopy(B,I); //implemented
                                 break;
                 case U_COPY : //errs()<<"copy into an unknown pointer";
                                 addNewCopy(B,I);
@@ -318,11 +318,11 @@ namespace {
                                 addLoadToUnknownDereference(B,I);
                                 break;
                 case STORE : //errs()<<"\nstore instruction";
-                                addStoreToDereference(B,I);
+                                addStoreToDereference(B,I); //implemented
                                 break;
-                case PHI_COPY : addPhiInstruction(B,I);
+                case PHI_COPY : addPhiInstruction(B,I); //implemented
                                 break;
-                case FUNC_CALL : applyFunctionSummary(B,I);
+                case FUNC_CALL : applyFunctionSummary(B,I); //Ongoing
                                 break;
                 default : errs()<<"\ninvalid instruction";
             }
@@ -423,7 +423,7 @@ namespace {
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
             srcNode.vertexTy=ptr;
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                errs()<<"\n Found as exising vertex!!!";
+                //errs()<<"\n Found as exising vertex!!!";
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(&I);
@@ -445,16 +445,30 @@ namespace {
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
             PHINode *Phi = dyn_cast<PHINode>(&I);
-            errs()<<"\n Processing phi instruction \n";
+            Phi->dump();
+            //errs()<<"\n Processing phi instruction \n";
             //errs()<<Phi->getNumIncomingValues()<<"...\n";
             int l=Phi->getNumIncomingValues();
+            V destNode;
+            destNode.name=dyn_cast<Value>(&I);
+            destNode.vertexTy=ptr;
             for (int i=0; i<l; i++) {
-               Phi->getIncomingValue(i)->dump();
+                //Phi->getIncomingValue(i)->dump();
 //               errs()<<"\n ......\n";
-                V srcNode, destNode;
+                V srcNode;
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
                 if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                    errs()<<"\n Found an existing node !!! \n";
+                    //errs()<<"\n Found an existing node !!! \n";
+                    if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
+                    //This is a copy to existing node.
+                //    vit=HeapOFGraph.vertices.find(destNode);
+                //    destNode = *vit;
+                    } else {
+                        HeapOFGraph.vertices.insert(destNode);
+                    }
+                    F flowEdge;
+                    flowEdge.head=destNode;
+                    flowEdge.tail=srcNode;
                 }
             }
         }
