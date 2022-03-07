@@ -305,17 +305,8 @@ namespace {
                 case K_COPY : //errs()<<"copy into a known pointer";
                                 addCopy(B,I); //implemented
                                 break;
-                case U_COPY : //errs()<<"copy into an unknown pointer";
-                                addNewCopy(B,I);
-                                break;
                 case DEREF : //errs()<<"\n found a dereference";
                                 addDereference(B,I);
-                                break;
-                case LK_DEREF : //errs()<<"\nload with known dereference";
-                                addLoadToKnownDereference(B,I);
-                                break;
-                case LU_DEREF : //errs()<<"\nload with unknown dereference";
-                                addLoadToUnknownDereference(B,I);
                                 break;
                 case STORE : //errs()<<"\nstore instruction";
                                 addStoreToDereference(B,I); //implemented
@@ -456,6 +447,7 @@ namespace {
                 //Phi->getIncomingValue(i)->dump();
 //               errs()<<"\n ......\n";
                 V srcNode;
+                BasicBlock *src = Phi->getIncomingBlock(i);
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
                 if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
                     //errs()<<"\n Found an existing node !!! \n";
@@ -523,6 +515,7 @@ namespace {
             } else {
                 generateFunctionSummary(*F);
             }
+            //applySummary(F,B,I); to be implemented
         }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
