@@ -104,7 +104,7 @@ namespace {
             return true;
 	    };
         void printHOFG() { //To print generated HOFG
-            errs()<<"\nPrinting HOFG : \n";
+            errs()<<"\nPrinting HOFG : edges\n";
             for (F e : HeapOFGraph.flows) {
                 e.tail.name->dump();
                 errs()<<"-->";
@@ -116,6 +116,11 @@ namespace {
             }
             for (D e : HeapOFGraph.derived) {
 
+            }
+            errs()<<"\nPrinting HOFG: vertices\n";
+            for (V e : HeapOFGraph.vertices) {
+                e.name->dump();
+                errs()<<"\n";
             }
         }
         void constructHOFG(Function &F) {
@@ -166,8 +171,6 @@ namespace {
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &I(*BI);
                 if(isMallocFunction(I)) {
-                    //errs()<<"\nReached here... : ";
-                    //I.dump();
                     handleRelevantCodeSegment(MEM_ALLOC, B, I);                    
                 }
                 if(isFreeFunction(I)) {
@@ -358,6 +361,8 @@ namespace {
                             ptrNode.name->dump();
                         }
                     }
+                } else {
+                    HeapOFGraph.vertices.insert(objNode); //malloc funciton is calle, but not used
                 }
             }
         }
@@ -499,10 +504,10 @@ namespace {
         void applyFunctionSummary(BasicBlock &B, Instruction &I) {
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *F = call->getCalledFunction();
-            if(F.hasMetadata("summary")) {
+            if(F->hasMetadata("summary")) {
 
             } else {
-                generateFunctionSummary(F);
+                generateFunctionSummary(*F);
             }
         }
         void traverseCallGraph(Module &M) {
