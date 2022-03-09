@@ -11,6 +11,7 @@ Starts with function: generateSummary(Module M)
 
 */
 
+
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
@@ -35,7 +36,7 @@ namespace {
 	struct HOFG : public ModulePass {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
-        enum vertexType {obj,ptr,snk,oos}; //obj: new heap object, ptr: pointer, snk: free statement; oos: out of scope
+        enum vertexType {obj,ptr,snk}; //obj: new heap object, ptr: pointer, snk: free statement
         enum funcType {allocator,deallocator,alldeall};
         struct V{
             Value *name;
@@ -98,7 +99,15 @@ namespace {
             //} while (! (HeapOFGraph == P));
             //P=HeapOFGraph;
             //constructHOFG(M);
-            generateSummary(M); //Starting point
+            /*
+            Function : generateSummary(Module &M)
+            Input : Module
+            Output: HOFG of the module*/
+            generateSummary(M); //Starting point 
+            /*
+            Function : printHOFG
+            Output : Prints the generated HOFG : edges and vertices
+            */
             printHOFG();
             //traverseCallGraph(M);
             return true;
@@ -132,17 +141,24 @@ namespace {
         void generateSummary(Module &M) {
             for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
                 Function &F(*MI);
-                constructHOFGfun(F); //Generate function summary
+                /*
+                Function : constructHOFGfun(Function &F)
+                Input : function
+                Output : HOFG of the function
+                */
+                constructHOFGfun(F);
                 LLVMContext& C=F.getContext();
                 MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
                 F.setMetadata("summary",N);
             }
         }
         void generateFunctionSummary(Function &F) { //generate HOFG of the function
-            constructHOFGfun(F);
+            //constructHOFGfun(F);
             int argInx=0;
+            errs()<<"\n Function with args : " << F.getName()<<"\n";
             for (auto& A : F.args()) {
                 //A.dump();
+                
                 if(A.hasName()) {
                     Value *argValue = dyn_cast<Value>(F.getArg(argInx));
                     if(isa<PointerType>(argValue->getType())) {
@@ -163,6 +179,11 @@ namespace {
         void constructHOFGfun(Function &F) { 
             for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
                 BasicBlock &B(*FI);
+                /*
+                Function : idRelevantCodeSegment(BasicBlock B)
+                Input : Basic Block
+                Output : Identify the code segments in Basic Block that complies to the rules in the algorithm and invoke corresponding handlers
+                */
                 idRelevantCodeSegment(B);
             }
         }
@@ -270,7 +291,7 @@ namespace {
         //            }
         //        }
         //    }
-        //    return false;
+            return false;
         }
 
         bool identifyStoreInstruction(Instruction &I) {
@@ -291,7 +312,11 @@ namespace {
             //}
             return false;
         }
-
+        /*
+        Function : handleRelevantCodeSegment (int Option, BasicBlock &B, Instruction &I)
+        Input : identification of code segment, basic block and instruciton pointer
+        Output : Invoke corresponding function that adds the vertices and edges to HOFG.
+        */
         void handleRelevantCodeSegment(int option, BasicBlock &B, Instruction &I) { //case handler of code segments that are relevent to algorithm
             //errs()<<"\n Reached in handler : "<< B.getName();
 ///            errs()<<"\n function name: "<< B.getParent()->getName();
@@ -315,7 +340,7 @@ namespace {
                                 break;
                 case FUNC_CALL : applyFunctionSummary(B,I); //Ongoing
                                 break;
-                default : errs()<<"\ninvalid instruction";
+                default : errs()<<"\ninvalid instruction"<<option;
             }
         }
         void addMalloc(BasicBlock &B, Instruction &I) {
@@ -511,7 +536,7 @@ namespace {
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *F = call->getCalledFunction();
             if(F->hasMetadata("summary")) {
-
+                applySummary(*F);
             } else {
                 generateFunctionSummary(*F);
             }
