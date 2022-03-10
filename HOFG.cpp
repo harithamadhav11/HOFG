@@ -37,7 +37,7 @@ namespace {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
         enum vertexType {obj,ptr,snk}; //obj: new heap object, ptr: pointer, snk: free statement
-        enum funcType {allocator,deallocator,alldeall};
+        enum funcType {allocator,deallocator,allocdealloc};
         struct V{
             Value *name;
             vertexType vertexTy;
@@ -76,9 +76,14 @@ namespace {
             &&(flows == other.flows) && (derefs == other.derefs) && (derived == other.derived));}
         }HeapOFGraph;
         struct FuncSummary {
-            Value funcName;
-            std::list<funcType> args;
+            Function *funcName; //pointer to the function
+            funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
+            std::set<Value*> formalArgs; //List of formal arguments to the function
+            std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
+            Value *retType; //return type of the function
+            Value *returnValue; //return value of the function
         };
+        std::set<FuncSummary> allFuncSummaries; //set of all function summaries
         std::set<V>::iterator vit;
         struct E {
             std::set<F> flows;
@@ -176,15 +181,23 @@ namespace {
                 argInx++;
             }
         }
-        void constructHOFGfun(Function &F) { 
-            for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
-                BasicBlock &B(*FI);
-                /*
-                Function : idRelevantCodeSegment(BasicBlock B)
-                Input : Basic Block
-                Output : Identify the code segments in Basic Block that complies to the rules in the algorithm and invoke corresponding handlers
-                */
-                idRelevantCodeSegment(B);
+        void constructHOFGfun(Function &F) {
+            if(! F.isDeclaration()) {
+                FuncSummary newFunc;
+                newFunc.funcName=&F;
+                int numargs=0;
+                for (auto& A : F.args()) {
+                    newFunc.formalArgs.insert(&A);
+                }
+                for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
+                    BasicBlock &B(*FI);
+                    /*
+                    Function : idRelevantCodeSegment(BasicBlock B)
+                    Input : Basic Block
+                    Output : Identify the code segments in Basic Block that complies to the rules in the algorithm and invoke corresponding handlers
+                    */
+                    idRelevantCodeSegment(B);
+                }
             }
         }
 
@@ -541,6 +554,9 @@ namespace {
                 generateFunctionSummary(*F);
             }
             //applySummary(F,B,I); to be implemented
+        }
+        void applySummary(Function &F) {
+
         }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
