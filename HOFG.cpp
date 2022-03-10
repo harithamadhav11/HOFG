@@ -80,8 +80,7 @@ namespace {
             funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
             std::set<Value*> formalArgs; //List of formal arguments to the function
             std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
-            Value *retType; //return type of the function
-            Value *returnValue; //return value of the function
+            Type *retType; //return type of the function
         };
         std::set<FuncSummary> allFuncSummaries; //set of all function summaries
         std::set<V>::iterator vit;
@@ -185,10 +184,12 @@ namespace {
             if(! F.isDeclaration()) {
                 FuncSummary newFunc;
                 newFunc.funcName=&F;
+                newFunc.retType=F.getReturnType();
                 int numargs=0;
                 for (auto& A : F.args()) {
                     newFunc.formalArgs.insert(&A);
                 }
+                //Need to find out function type : (alloc,dealloc or allocdealloc) and argtransforms
                 for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
                     BasicBlock &B(*FI);
                     /*
