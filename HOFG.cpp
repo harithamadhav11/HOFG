@@ -107,7 +107,12 @@ namespace {
             Function : generateSummary(Module &M)
             Input : Module
             Output: HOFG of the module*/
-            generateSummary(M); //Starting point 
+            HOFGraph P;
+            do {
+                P=HeapOFGraph;
+                generateSummary(M);
+            } while (! (HeapOFGraph == P));
+             //Starting point 
             /*
             Function : printHOFG
             Output : Prints the generated HOFG : edges and vertices
@@ -286,6 +291,8 @@ namespace {
             //return false;
             //To do: check for load instruction.
             if(isa<LoadInst>(&I)) {
+                errs()<<"\nload..";
+                I.dump();
                 if(!isa<GetElementPtrInst>(I.getOperand(0)) && isa<PointerType>(I.getType())) {
                     //errs()<<"\n Load correctly identified \n";
                     //I.dump();
@@ -375,12 +382,16 @@ namespace {
                         F flowEdge;
                         flowEdge.head=ptrNode;
                         flowEdge.tail=objNode;
+                        if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
+                            errs()<<"\nRepeat can be detected here";
+                        } else {
                         HeapOFGraph.flows.insert(flowEdge);
                         //errs()<<"\n Adding flow edge while handling malloc : \n";
                         //I.dump();
                         //errs()<<"\n to \n";
                         //Ins.dump();
                         //errs()<<"...................";
+                        }
                     } else if (isa<LoadInst>(Ins)) {
                         //To be handled for two level pointers
                     } else if (isa<StoreInst>(Ins)) {
@@ -453,7 +464,8 @@ namespace {
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
             srcNode.vertexTy=ptr;
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                //errs()<<"\n Found as exising vertex!!!";
+                errs()<<"\n Inside copy : of ";
+                I.dump();
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(&I);
@@ -470,7 +482,8 @@ namespace {
                 flowEdge.tail=srcNode;
                 HeapOFGraph.flows.insert(flowEdge);
             } else {
-
+                errs()<<"\n Found as not an exising vertex!!!";
+                I.dump();
             }
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
