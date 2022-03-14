@@ -44,11 +44,12 @@ namespace {
             int summaryRef; // To enable ssa for each summary application;
             bool operator < (const V &other) const {return name < other.name;}
             bool operator > (const V &other) const {return name > other.name;}
-            bool operator == (const V &other) const {return ((name == other.name) && (summaryRef==other.summaryRef));}
+            bool operator == (const V &other) const {return (name == other.name);}
         };
         struct F {
             V head;
             V tail;
+            Value *condition;
             bool operator < (const F &other) const {return ((head < other.head) || (tail < other.tail));}
             bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
@@ -291,14 +292,20 @@ namespace {
             //return false;
             //To do: check for load instruction.
             if(isa<LoadInst>(&I)) {
-                errs()<<"\nload..";
-                I.dump();
+                //errs()<<"\nload..";
+                //I.dump();
                 if(!isa<GetElementPtrInst>(I.getOperand(0)) && isa<PointerType>(I.getType())) {
                     //errs()<<"\n Load correctly identified \n";
                     //I.dump();
                     return true;
                 }
                 return false;
+            } else if (isa<BitCastInst>(&I)) {
+                if(isa<PointerType>(I.getOperand(0)->getType())) {                    
+                    //errs()<<" \n copy via bitcast : ";
+                    //I.dump();
+                    return true;
+                }
             }
             return false;
         }
@@ -383,7 +390,7 @@ namespace {
                         flowEdge.head=ptrNode;
                         flowEdge.tail=objNode;
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                            errs()<<"\nRepeat can be detected here";
+                        //    errs()<<"\nRepeat can be detected here";
                         } else {
                         HeapOFGraph.flows.insert(flowEdge);
                         //errs()<<"\n Adding flow edge while handling malloc : \n";
@@ -416,9 +423,9 @@ namespace {
                 freeNode = *vit;
                 //freeNode.name->dump();
             } else {
-                if(! (HeapOFGraph.vertices.insert(freeNode).second)) {
+                //if(! (HeapOFGraph.vertices.insert(freeNode).second)) {
                     //errs()<<"\nHere is the real culprit";
-                }
+                //}
             }
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &Ins(*BI);
@@ -442,8 +449,13 @@ namespace {
                         F flowEdge;
                         flowEdge.tail=ptrNode;
                         flowEdge.head=freeNode;
-                        if (! (HeapOFGraph.flows.insert(flowEdge).second)) {
+                        //if (! (HeapOFGraph.flows.insert(flowEdge).second)) { .insert.second will return if the insertion is successful
                             //errs()<<"Here it didnt work";
+                        //}
+                        if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
+                        //    errs()<<"\nRepeat can be detected here";
+                        } else { 
+                            HeapOFGraph.flows.insert(flowEdge);
                         }
                         //errs()<<"\n Adding flow edge while handling dealloc : \n";
                         //Ins.dump();
@@ -464,8 +476,8 @@ namespace {
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
             srcNode.vertexTy=ptr;
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                errs()<<"\n Inside copy : of ";
-                I.dump();
+                //errs()<<"\n Inside copy : of ";
+                //I.dump();
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(&I);
@@ -480,7 +492,11 @@ namespace {
                 F flowEdge;
                 flowEdge.head=destNode;
                 flowEdge.tail=srcNode;
+                if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
+                        //    errs()<<"\nRepeat can be detected here";
+                        } else {
                 HeapOFGraph.flows.insert(flowEdge);
+                        }
             } else {
                 errs()<<"\n Found as not an exising vertex!!!";
                 I.dump();
@@ -488,7 +504,7 @@ namespace {
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
             PHINode *Phi = dyn_cast<PHINode>(&I);
-            Phi->dump();
+            //Phi->dump();
             //errs()<<"\n Processing phi instruction \n";
             //errs()<<Phi->getNumIncomingValues()<<"...\n";
             int l=Phi->getNumIncomingValues();
@@ -513,6 +529,12 @@ namespace {
                     F flowEdge;
                     flowEdge.head=destNode;
                     flowEdge.tail=srcNode;
+                    flowEdge.condition=src;
+                    if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
+                        //    errs()<<"\nRepeat can be detected here";
+                        } else {
+                    HeapOFGraph.flows.insert(flowEdge);
+                        }
                 }
             }
         }
@@ -556,7 +578,11 @@ namespace {
                 F flowEdge;
                 flowEdge.tail=srcNode;
                 flowEdge.head=destNode;
+                if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
+                        //    errs()<<"\nRepeat can be detected here";
+                        } else {
                 HeapOFGraph.flows.insert(flowEdge);
+                        }
             }
         }
         void applyFunctionSummary(BasicBlock &B, Instruction &I) {
