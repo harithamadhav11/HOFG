@@ -41,7 +41,6 @@ namespace {
         struct V{
             Value *name;
             vertexType vertexTy;
-            int summaryRef; // To enable ssa for each summary application;
             bool operator < (const V &other) const {return name < other.name;}
             bool operator > (const V &other) const {return name > other.name;}
             bool operator == (const V &other) const {return (name == other.name);}
@@ -83,8 +82,15 @@ namespace {
             std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
             Type *retType; //return type of the function
         };
+        struct predBB {
+            BasicBlock *bb;
+            std::set<BasicBlock*> preds;
+            bool operator == (const predBB &other) const {return bb == other.bb;}
+            bool operator < (const predBB &other) const {return bb < other.bb;}
+        };
         std::set<FuncSummary> allFuncSummaries; //set of all function summaries
         std::set<V>::iterator vit;
+        std::set<predBB> allBBs; //set of all basic blocks and their predecessors
         struct E {
             std::set<F> flows;
             std::set<R> derefs;
@@ -198,12 +204,40 @@ namespace {
                 //Need to find out function type : (alloc,dealloc or allocdealloc) and argtransforms
                 for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
                     BasicBlock &B(*FI);
+                    predBB newPredSet;
+                    newPredSet.bb=&B;
+                    auto bt=pred_begin(&B);
+                    auto et=pred_end(&B);
+                    //errs()<<"\npreds of BB "<<B.getName()<<" are\n";
+                    for (bt = pred_begin(&B), et = pred_end(&B); bt != et; ++bt)
+                    {
+                        BasicBlock* predecessor = *bt;
+                        newPredSet.preds.insert(predecessor);
+                        predBB ifExistPreds;
+                        ifExistPreds.bb = predecessor;
+                        if(allBBs.find(ifExistPreds) != allBBs.end()) {
+                            //errs()<<"Found an existing entry for bb";
+                            ifExistPreds = *(allBBs.find(ifExistPreds));
+                            for(BasicBlock *p : ifExistPreds.preds) {
+                                newPredSet.preds.insert(p);
+                            }
+                        }
+                        //errs()<< "\nBBname: "<< predecessor->getName()<<"\n";
+                    }
+                    allBBs.insert(newPredSet);
                     /*
                     Function : idRelevantCodeSegment(BasicBlock B)
                     Input : Basic Block
                     Output : Identify the code segments in Basic Block that complies to the rules in the algorithm and invoke corresponding handlers
                     */
                     idRelevantCodeSegment(B);
+                }
+                errs()<<"\nPrinting predecessors of BBs";
+                for (predBB b: allBBs) {
+                    errs()<<"\nFor BB"<<b.bb->getName()<<" :\n";
+                    for (BasicBlock* p: b.preds) {
+                        errs()<<p->getName()<<"\n";
+                    }
                 }
             }
         }
@@ -304,7 +338,7 @@ namespace {
                 if(isa<PointerType>(I.getOperand(0)->getType())) {                    
                     //errs()<<" \n copy via bitcast : ";
                     //I.dump();
-                    return true;
+                    //return true;
                 }
             }
             return false;
