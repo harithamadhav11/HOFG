@@ -85,6 +85,7 @@ namespace {
         struct predBB {
             BasicBlock *bb;
             std::set<BasicBlock*> preds;
+            std::set<Value*> entriConditions;
             bool operator == (const predBB &other) const {return bb == other.bb;}
             bool operator < (const predBB &other) const {return bb < other.bb;}
         };
@@ -212,6 +213,21 @@ namespace {
                     for (bt = pred_begin(&B), et = pred_end(&B); bt != et; ++bt)
                     {
                         BasicBlock* predecessor = *bt;
+                        Instruction* terminator = predecessor->getTerminator();
+                        if(isa<BranchInst>(terminator)) {
+                            BranchInst* br = dyn_cast<BranchInst>(terminator);
+                            if(br->isConditional()) {
+                                Value *cond= br->getCondition();
+                                //cond->dump();
+                                for(BasicBlock* s : br->successors()) {
+                                    if(s->getName() == B.getName()) {
+                                        newPredSet.entriConditions.insert(cond);
+                                        //errs()<<"Condition is for "<<s->getName()<<"\n";
+                                    }
+                                }
+
+                            }
+                        }
                         newPredSet.preds.insert(predecessor);
                         predBB ifExistPreds;
                         ifExistPreds.bb = predecessor;
@@ -220,6 +236,9 @@ namespace {
                             ifExistPreds = *(allBBs.find(ifExistPreds));
                             for(BasicBlock *p : ifExistPreds.preds) {
                                 newPredSet.preds.insert(p);
+                            }
+                            for (Value *c : ifExistPreds.entriConditions) {
+                                newPredSet.entriConditions.insert(c);
                             }
                         }
                         //errs()<< "\nBBname: "<< predecessor->getName()<<"\n";
@@ -237,6 +256,9 @@ namespace {
                     errs()<<"\nFor BB"<<b.bb->getName()<<" :\n";
                     for (BasicBlock* p: b.preds) {
                         errs()<<p->getName()<<"\n";
+                    }
+                    for (Value *c : b.entriConditions) {
+                        errs()<<c->getName()<<"\n";
                     }
                 }
             }
