@@ -32,7 +32,6 @@ Starts with function: generateSummary(Module M)
 using namespace llvm;
 
 namespace {
-	//Hello3 this is for trying out various functions
 	struct HOFG : public ModulePass {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
@@ -48,7 +47,7 @@ namespace {
         struct F {
             V head;
             V tail;
-            Value *condition;
+            std::set<Value*> conditions;
             bool operator < (const F &other) const {return ((head < other.head) || (tail < other.tail));}
             bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
@@ -174,8 +173,6 @@ namespace {
             int argInx=0;
             errs()<<"\n Function with args : " << F.getName()<<"\n";
             for (auto& A : F.args()) {
-                //A.dump();
-                
                 if(A.hasName()) {
                     Value *argValue = dyn_cast<Value>(F.getArg(argInx));
                     if(isa<PointerType>(argValue->getType())) {
@@ -183,8 +180,6 @@ namespace {
                         argNode.name=argValue;
                         errs()<<"\n showing the argument : ";
                         argValue->dump();
-                        //argNode.vertexTy=obj;
-
                         if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
                             errs()<<"\n It in here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!1";
                         }
@@ -202,7 +197,8 @@ namespace {
                 for (auto& A : F.args()) {
                     newFunc.formalArgs.insert(&A);
                 }
-                //Need to find out function type : (alloc,dealloc or allocdealloc) and argtransforms
+                // To do : Need to find out function type : (alloc,dealloc or allocdealloc) and argtransforms
+                //Following for loop is to record preds of bbs and conditions
                 for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
                     BasicBlock &B(*FI);
                     predBB newPredSet;
@@ -225,7 +221,6 @@ namespace {
                                         //errs()<<"Condition is for "<<s->getName()<<"\n";
                                     }
                                 }
-
                             }
                         }
                         newPredSet.preds.insert(predecessor);
@@ -251,16 +246,16 @@ namespace {
                     */
                     idRelevantCodeSegment(B);
                 }
-                errs()<<"\nPrinting predecessors of BBs";
-                for (predBB b: allBBs) {
-                    errs()<<"\nFor BB"<<b.bb->getName()<<" :\n";
-                    for (BasicBlock* p: b.preds) {
-                        errs()<<p->getName()<<"\n";
-                    }
-                    for (Value *c : b.entriConditions) {
-                        errs()<<c->getName()<<"\n";
-                    }
-                }
+                //errs()<<"\nPrinting predecessors of BBs";
+                //for (predBB b: allBBs) {
+                //    errs()<<"\nFor BB"<<b.bb->getName()<<" :\n";
+                //    for (BasicBlock* p: b.preds) {
+                //        errs()<<p->getName()<<"\n";
+                //    }
+                //    for (Value *c : b.entriConditions) {
+                //        errs()<<c->getName()<<"\n";
+                //    }
+                //}
             }
         }
 
@@ -397,6 +392,27 @@ namespace {
             return false;
         }
         /*
+        Function : annotateEdge (F flowEdge)
+        Input : the flow edge of the HOFG
+        Output : Annotate the flow edge with the conditions to be satisfied for the program to execute the statement represented by the edge.
+        */
+        void annotateEdge(F flowEdge) {
+            BasicBlock *tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
+            BasicBlock *head = dyn_cast<Instruction>(flowEdge.head.name)->getParent();
+            predBB fromBB;
+            fromBB.bb = tail;
+            if(allBBs.find(fromBB) != allBBs.end()) {
+                fromBB = *(allBBs.find(fromBB));
+                //errs()<<"\nPrinting conditions";
+                for (Value *c : fromBB.entriConditions) {
+                //    errs()<<"\n ";
+                //    c->dump();
+                    flowEdge.conditions.insert(c);
+                }
+            }
+
+        }
+        /*
         Function : handleRelevantCodeSegment (int Option, BasicBlock &B, Instruction &I)
         Input : identification of code segment, basic block and instruciton pointer
         Output : Invoke corresponding function that adds the vertices and edges to HOFG.
@@ -448,6 +464,7 @@ namespace {
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                        annotateEdge(flowEdge);
                         HeapOFGraph.flows.insert(flowEdge);
                         //errs()<<"\n Adding flow edge while handling malloc : \n";
                         //I.dump();
@@ -510,7 +527,8 @@ namespace {
                         //}
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
-                        } else { 
+                        } else {
+                            annotateEdge(flowEdge); 
                             HeapOFGraph.flows.insert(flowEdge);
                         }
                         //errs()<<"\n Adding flow edge while handling dealloc : \n";
@@ -551,11 +569,12 @@ namespace {
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            annotateEdge(flowEdge);
                 HeapOFGraph.flows.insert(flowEdge);
                         }
             } else {
-                errs()<<"\n Found as not an exising vertex!!!";
-                I.dump();
+                //errs()<<"\n Found as not an exising vertex!!!";
+                //I.dump();
             }
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
@@ -585,10 +604,11 @@ namespace {
                     F flowEdge;
                     flowEdge.head=destNode;
                     flowEdge.tail=srcNode;
-                    flowEdge.condition=src;
+                    //flowEdge.condition=src;
                     if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            annotateEdge(flowEdge);
                     HeapOFGraph.flows.insert(flowEdge);
                         }
                 }
@@ -637,6 +657,7 @@ namespace {
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            annotateEdge(flowEdge);
                 HeapOFGraph.flows.insert(flowEdge);
                         }
             }
