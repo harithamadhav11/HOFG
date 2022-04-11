@@ -171,17 +171,17 @@ namespace {
         void generateFunctionSummary(Function &F) { //generate HOFG of the function
             //constructHOFGfun(F);
             int argInx=0;
-            errs()<<"\n Function with args : " << F.getName()<<"\n";
+            //errs()<<"\n Function with args : " << F.getName()<<"\n";
             for (auto& A : F.args()) {
                 if(A.hasName()) {
                     Value *argValue = dyn_cast<Value>(F.getArg(argInx));
                     if(isa<PointerType>(argValue->getType())) {
                         V argNode;
                         argNode.name=argValue;
-                        errs()<<"\n showing the argument : ";
-                        argValue->dump();
+              //          errs()<<"\n showing the argument : ";
+              //          argValue->dump();
                         if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
-                            errs()<<"\n It in here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!1";
+              //              errs()<<"\n It in here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!1";
                         }
                     }
                 }
@@ -294,8 +294,14 @@ namespace {
                 if(isa<CallInst>(I)) {
                     CallInst *call=dyn_cast<CallInst>(&I);
                     Function *F = call->getCalledFunction();
-                    if(F->getName() == MALLOC) {
-                        return true;
+                    //F->dump();
+                    if(F->hasName()) {
+                        //errs()<<F->getName();
+                        //errs()<<"\n";
+                        if(F->getName() == MALLOC) {
+                            return true;
+                        }
+                    }  else {
                     }
                 }
             //}
@@ -305,10 +311,13 @@ namespace {
             //if(isa<BitCastInst>(I)) {
                 if(isa<CallInst>(I)) {
                     CallInst *call=dyn_cast<CallInst>(&I);
-                    Function *F = call->getCalledFunction();
-                    if(! F->isDeclaration()) {
-                        return true;
-                    }
+                    //if(call->hasName()) {
+                        Function *F = call->getCalledFunction();
+                        if(! F->isDeclaration()) {
+                            return true;
+                        }
+                    //} else {
+                    //}
                 }
             //}
             return false;
@@ -319,9 +328,14 @@ namespace {
                 if(isa<CallInst>(I)) {
                     CallInst *call=dyn_cast<CallInst>(&I);
                     Function *F = call->getCalledFunction();
-                    if(F->getName() == FREE) {
-                        return true;
-                    }
+                    //if(call->hasName()) {
+                        //errs()<<F->getName();
+                        if(F->getName() == FREE) {
+                            errs()<<"free";
+                            return true;
+                        }
+                    //} else {
+                    //}
                 }
             //}
             return false;
@@ -475,11 +489,11 @@ namespace {
                     } else if (isa<LoadInst>(Ins)) {
                         //To be handled for two level pointers
                     } else if (isa<StoreInst>(Ins)) {
-                        errs()<<"\n detected store \n";
+                        //errs()<<"\n detected store \n";
                         ptrNode.name=dyn_cast<Value>(Ins.getOperand(1));
                         if(HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
-                            errs()<<"\n Its already here ...";
-                            ptrNode.name->dump();
+                            //errs()<<"\n Its already here ...";
+                            //ptrNode.name->dump();
                         }
                     }
                 } else {
@@ -528,6 +542,7 @@ namespace {
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            HeapOFGraph.vertices.insert(freeNode);
                             annotateEdge(flowEdge); 
                             HeapOFGraph.flows.insert(flowEdge);
                         }
