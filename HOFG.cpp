@@ -80,6 +80,7 @@ namespace {
             std::set<Value*> formalArgs; //List of formal arguments to the function
             std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
             Type *retType; //return type of the function
+            bool operator < (const FuncSummary &other) const {return (funcName < other.funcName);}
         };
         struct predBB {
             BasicBlock *bb;
@@ -114,11 +115,11 @@ namespace {
             Function : generateSummary(Module &M)
             Input : Module
             Output: HOFG of the module*/
-            HOFGraph P;
-            do {
-                P=HeapOFGraph;
+            //HOFGraph P;
+            //do {
+            //    P=HeapOFGraph;
                 generateSummary(M);
-            } while (! (HeapOFGraph == P));
+            //} while (! (HeapOFGraph == P));
              //Starting point 
             /*
             Function : printHOFG
@@ -166,6 +167,13 @@ namespace {
                 LLVMContext& C=F.getContext();
                 MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
                 F.setMetadata("summary",N);
+                FuncSummary summary;
+                summary.funcName = &F;
+                //summary.functionType = ;
+                //summary.formalArgs = ;
+                //summary.argTransforms = ;
+                //summary.retType= ;
+                allFuncSummaries.insert(summary);
             }
         }
         void generateFunctionSummary(Function &F) { //generate HOFG of the function
@@ -290,18 +298,28 @@ namespace {
             }
         }
         bool isMallocFunction(Instruction &I) {
+            //I.dump();
             //if(isa<BitCastInst>(I)) {
                 if(isa<CallInst>(I)) {
                     CallInst *call=dyn_cast<CallInst>(&I);
-                    Function *F = call->getCalledFunction();
-                    //F->dump();
-                    if(F->hasName()) {
-                        //errs()<<F->getName();
-                        //errs()<<"\n";
-                        if(F->getName() == MALLOC) {
-                            return true;
+                    //if(isa<Function>(call->getCalledFunction())) {
+                    if(call->getCalledFunction() == NULL) {
+                        return false;
+                    }
+                    if(Function *F = dyn_cast<Function>(call->getCalledFunction())) {
+                        //Function *F = call->getCalledFunction();
+                        //F->dump();
+                        if(F->hasName()) {
+                            //errs()<<F->getName();
+                            //errs()<<"\n";
+                            if(F->getName() == MALLOC|| F->getName() == "u_calloc") {
+                                return true;
+                            } else if (F->getName() ==  "xmalloc") {
+                                F->setName("malloc");
+                                return true;
+                            }
+                        }  else {
                         }
-                    }  else {
                     }
                 }
             //}
@@ -312,6 +330,9 @@ namespace {
                 if(isa<CallInst>(I)) {
                     CallInst *call=dyn_cast<CallInst>(&I);
                     //if(call->hasName()) {
+                        if(call->getCalledFunction() == NULL) {
+                           return false;
+                        }
                         Function *F = call->getCalledFunction();
                         if(! F->isDeclaration()) {
                             return true;
@@ -330,8 +351,11 @@ namespace {
                     Function *F = call->getCalledFunction();
                     //if(call->hasName()) {
                         //errs()<<F->getName();
+                        if(call->getCalledFunction() == NULL) {
+                           return false;
+                        }
                         if(F->getName() == FREE) {
-                            errs()<<"free";
+                            //errs()<<"free";
                             return true;
                         }
                     //} else {
@@ -411,8 +435,18 @@ namespace {
         Output : Annotate the flow edge with the conditions to be satisfied for the program to execute the statement represented by the edge.
         */
         void annotateEdge(F flowEdge) {
+            //if(isa<GlobalVariable>(flowEdge.head.name)) {
+                
+            //} else {
+            //    errs()<<"Did not identify";
+            //    flowEdge.head.name->dump();
+            //    BasicBlock *head = dyn_cast<Instruction>(flowEdge.head.name)->getParent();
+            //}
+            //errs()<<"................................";
+            //flowEdge.tail.name->dump();
+            //errs()<<".................................\n";
             BasicBlock *tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
-            BasicBlock *head = dyn_cast<Instruction>(flowEdge.head.name)->getParent();
+            
             predBB fromBB;
             fromBB.bb = tail;
             if(allBBs.find(fromBB) != allBBs.end()) {
@@ -464,8 +498,17 @@ namespace {
             //objNode.name->dump();
             objNode.vertexTy=obj;
             //HeapOFGraph.vertices.insert(objNode);
+            Type *ty = I.getFunction()->getReturnType();
+            if(ty->isPointerTy()) {
+                //errs()<<"\n Void type return for this malloc\n";
+            } else {
+                //errs()<<"\n did not detect void\n";
+            }
             for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
                 Instruction &Ins(*BI);
+                if(Ins.getNumOperands()<1) {
+                    continue;
+                }
                 if(dyn_cast<Instruction>(Ins.getOperand(0)) == &I) {
                     if(isa<BitCastInst>(Ins)) {//for two level pointers, there can be load statement instead of bitcast befor malloc
                         ptrNode.name=dyn_cast<Value>(&Ins);
@@ -478,6 +521,12 @@ namespace {
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            for(Argument &A : I.getFunction()->args()) {
+                                Value* arg = dyn_cast<Value>(&A);
+                                if(arg == ptrNode.name) {
+                                    errs()<<"\nhead is an arg\n";
+                                }
+                            }
                         annotateEdge(flowEdge);
                         HeapOFGraph.flows.insert(flowEdge);
                         //errs()<<"\n Adding flow edge while handling malloc : \n";
@@ -542,6 +591,14 @@ namespace {
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            for(Argument &A : I.getFunction()->args()) {
+                                Value* arg = dyn_cast<Value>(&A);
+                                arg->dump();
+                                ptrNode.name->dump();
+                                if(arg == ptrNode.name || arg == dyn_cast<Instruction>(ptrNode.name)->getOperand(0)) {
+                                    errs()<<"\nhead is an arg\n";
+                                }
+                            }
                             HeapOFGraph.vertices.insert(freeNode);
                             annotateEdge(flowEdge); 
                             HeapOFGraph.flows.insert(flowEdge);
@@ -584,6 +641,12 @@ namespace {
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            for(Argument &A : I.getFunction()->args()) {
+                                Value* arg = dyn_cast<Value>(&A);
+                                if(arg == destNode.name) {
+                                    errs()<<"\nhead is an arg\n";
+                                }
+                            }
                             annotateEdge(flowEdge);
                 HeapOFGraph.flows.insert(flowEdge);
                         }
@@ -623,6 +686,12 @@ namespace {
                     if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            for(Argument &A : I.getFunction()->args()) {
+                                Value* arg = dyn_cast<Value>(&A);
+                                if(arg == destNode.name) {
+                                    errs()<<"\nhead is an arg\n";
+                                }
+                            }
                             annotateEdge(flowEdge);
                     HeapOFGraph.flows.insert(flowEdge);
                         }
@@ -672,6 +741,12 @@ namespace {
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            for(Argument &A : I.getFunction()->args()) {
+                                Value* arg = dyn_cast<Value>(&A);
+                                if(arg == destNode.name) {
+                                    errs()<<"\nhead is an arg\n";
+                                }
+                            }
                             annotateEdge(flowEdge);
                 HeapOFGraph.flows.insert(flowEdge);
                         }
@@ -681,13 +756,34 @@ namespace {
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *F = call->getCalledFunction();
             if(F->hasMetadata("summary")) {
-                applySummary(*F);
+                applySummary(*F,*call);
             } else {
                 generateFunctionSummary(*F);
             }
             //applySummary(F,B,I); to be implemented
         }
-        void applySummary(Function &F) {
+        void applySummary(Function &F, CallInst &I) {
+            //errs()<<"\n Inside apply summary function : of function call at \n";
+            //I.dump();
+            //errs()<<"\n";
+            int argInx=0;
+            //errs()<<"\n Function with args : " << F.getName()<<"\n";
+            for (auto& A : I.args()) {
+                //if(A.get()->hasName()) {
+                    Value *argValue = dyn_cast<Value>(A.get());
+                    argValue->dump();
+                    if(isa<PointerType>(argValue->getType())) {
+                        V argNode;
+                        argNode.name=argValue;
+              //          errs()<<"\n showing the argument : ";
+              //          argValue->dump();
+                        if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
+                            errs()<<"\n found that actual arg is already in v list....!!!!\n";
+                        }
+                    }
+                //}
+                argInx++;
+            }
 
         }
         void traverseCallGraph(Module &M) {
