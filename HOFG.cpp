@@ -36,15 +36,15 @@ namespace {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
         enum vertexType {obj,ptr,snk}; //obj: new heap object, ptr: pointer, snk: free statement
-        enum funcType {allocator,deallocator,allocdealloc};
-        struct V{
+        enum funcType {allocator,deallocator,allocdealloc};//Summary of a function specifies the function type
+        struct V{ //Data structure to store vertices
             Value *name;
             vertexType vertexTy;
             bool operator < (const V &other) const {return name < other.name;}
             bool operator > (const V &other) const {return name > other.name;}
             bool operator == (const V &other) const {return (name == other.name);}
         };
-        struct F {
+        struct F { //Data structure to store flow edges
             V head;
             V tail;
             std::set<Value*> conditions;
@@ -52,21 +52,21 @@ namespace {
             bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
         };
-        struct R {
+        struct R { //Data structure to store dereference edges
             V head;
             V tail;
             bool operator < (const R &other) const {return ((head < other.head) || (tail < other.tail));}
             bool operator > (const R &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const R &other) const {return ((head == other.head) && (tail == other.tail));}
         };
-        struct D {
+        struct D { //Data structure to store derived flow edges
             V head;
             V tail;
             bool operator < (const D &other) const {return ((head < other.head) || (tail < other.tail));}
             bool operator > (const D &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const D &other) const {return ((head == other.head) && (tail == other.tail));}
         };
-        struct HOFGraph {
+        struct HOFGraph { //The graph HOFG of the input program is stored in HeapOfGraph
             std::set<V> vertices;
             std::set<F> flows;
             std::set<R> derefs;
@@ -74,7 +74,7 @@ namespace {
             bool operator == (const HOFGraph &other) const {return ((vertices == other.vertices)
             &&(flows == other.flows) && (derefs == other.derefs) && (derived == other.derived));}
         }HeapOFGraph;
-        struct FuncSummary {
+        struct FuncSummary { //Datastructure for storing function summary
             Function *funcName; //pointer to the function
             funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
             std::set<Value*> formalArgs; //List of formal arguments to the function
@@ -82,7 +82,7 @@ namespace {
             Type *retType; //return type of the function
             bool operator < (const FuncSummary &other) const {return (funcName < other.funcName);}
         };
-        struct predBB {
+        struct predBB { //Storing conditins and predecessors
             BasicBlock *bb;
             std::set<BasicBlock*> preds;
             std::set<Value*> entriConditions;
@@ -92,7 +92,7 @@ namespace {
         std::set<FuncSummary> allFuncSummaries; //set of all function summaries
         std::set<V>::iterator vit;
         std::set<predBB> allBBs; //set of all basic blocks and their predecessors
-        struct E {
+        struct E { //Set of all  edges : for the time being, not used.
             std::set<F> flows;
             std::set<R> derefs;
             std::set<D> derived;
@@ -118,14 +118,14 @@ namespace {
             //HOFGraph P;
             //do {
             //    P=HeapOFGraph;
-                generateSummary(M);
+                generateSummary(M); // Call to generateSummary function, with argument module.
             //} while (! (HeapOFGraph == P));
              //Starting point 
             /*
             Function : printHOFG
             Output : Prints the generated HOFG : edges and vertices
             */
-            printHOFG();
+            printHOFG(); 
             //traverseCallGraph(M);
             return true;
 	    };
@@ -170,9 +170,12 @@ namespace {
                 FuncSummary summary;
                 summary.funcName = &F;
                 //summary.functionType = ;
-                //summary.formalArgs = ;
+                for(Argument &A : F.args()) {
+                    Value *argValue = dyn_cast<Value>(&A);
+                    summary.formalArgs.insert(argValue);
+                }
                 //summary.argTransforms = ;
-                //summary.retType= ;
+                summary.retType= F.getReturnType();
                 allFuncSummaries.insert(summary);
             }
         }
