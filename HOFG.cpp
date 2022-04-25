@@ -78,7 +78,7 @@ namespace {
             Function *funcName; //pointer to the function
             funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
             std::set<Value*> formalArgs; //List of formal arguments to the function
-            std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
+            mutable std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
             Type *retType; //return type of the function
             bool operator < (const FuncSummary &other) const {return (funcName < other.funcName);}
         };
@@ -90,6 +90,7 @@ namespace {
             bool operator < (const predBB &other) const {return bb < other.bb;}
         };
         std::set<FuncSummary> allFuncSummaries; //set of all function summaries
+        std::set<FuncSummary>::iterator fsit;
         std::set<V>::iterator vit;
         std::set<predBB> allBBs; //set of all basic blocks and their predecessors
         struct E { //Set of all  edges : for the time being, not used.
@@ -158,47 +159,48 @@ namespace {
         void generateSummary(Module &M) {
             for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
                 Function &F(*MI);
+                generateFunctionSummary(F);
+            }
+        }
+        void generateFunctionSummary(Function &F) { //generate HOFG of the function
                 /*
                 Function : constructHOFGfun(Function &F)
                 Input : function
                 Output : HOFG of the function
                 */
-                constructHOFGfun(F);
-                LLVMContext& C=F.getContext();
-                MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
-                F.setMetadata("summary",N);
+                
+                if(F.isDeclaration()) {
+
+                } else {
+                errs()<<"Generating summary of : "<<F.getName()<<"\n\n";
                 FuncSummary summary;
                 summary.funcName = &F;
-                //summary.functionType = ;
                 for(Argument &A : F.args()) {
                     Value *argValue = dyn_cast<Value>(&A);
                     summary.formalArgs.insert(argValue);
                 }
-                //summary.argTransforms = ;
                 summary.retType= F.getReturnType();
                 allFuncSummaries.insert(summary);
-            }
-        }
-        void generateFunctionSummary(Function &F) { //generate HOFG of the function
-            //constructHOFGfun(F);
-            int argInx=0;
-            //errs()<<"\n Function with args : " << F.getName()<<"\n";
-            for (auto& A : F.args()) {
-                if(A.hasName()) {
-                    Value *argValue = dyn_cast<Value>(F.getArg(argInx));
-                    if(isa<PointerType>(argValue->getType())) {
-                        V argNode;
-                        argNode.name=argValue;
-              //          errs()<<"\n showing the argument : ";
-              //          argValue->dump();
-                        if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
-              //              errs()<<"\n It in here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!1";
-                        }
-                    }
+                constructHOFGfun(F);
+                LLVMContext& C=F.getContext();
+                MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
+                F.setMetadata("summary",N);
+                
+                //summary.functionType = ;
+                
+                //summary.argTransforms = ;
+                
+                
                 }
-                argInx++;
-            }
         }
+        //FuncSummary* getFunctionSummary(Function *F) {
+        //    FuncSummary summary;
+        //    summary.funcName=F;
+        //    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+        //        fsit = allFuncSummaries.find(summary);
+        //        return (&(*fsit));
+        //    }
+        //}
         void constructHOFGfun(Function &F) {
             if(! F.isDeclaration()) {
                 FuncSummary newFunc;
@@ -527,10 +529,17 @@ namespace {
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == ptrNode.name) {
-                                    errs()<<"\nhead is an arg\n";
+                                    errs()<<"\nhead is an arg in malloc\n";
+                                    FuncSummary summary;
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        fsit->argTransforms.push_back(allocator);
+                                        //fsit->functionType=allocator;
+                                    }
                                 }
                             }
-                        annotateEdge(flowEdge);
+                         annotateEdge(flowEdge);
                         HeapOFGraph.flows.insert(flowEdge);
                         //errs()<<"\n Adding flow edge while handling malloc : \n";
                         //I.dump();
@@ -596,10 +605,10 @@ namespace {
                         } else {
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
-                                arg->dump();
-                                ptrNode.name->dump();
+                                //arg->dump();
+                                //ptrNode.name->dump();
                                 if(arg == ptrNode.name || arg == dyn_cast<Instruction>(ptrNode.name)->getOperand(0)) {
-                                    errs()<<"\nhead is an arg\n";
+                                    errs()<<"\ntail is an arg\n";
                                 }
                             }
                             HeapOFGraph.vertices.insert(freeNode);
@@ -647,7 +656,7 @@ namespace {
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == destNode.name) {
-                                    errs()<<"\nhead is an arg\n";
+                                    errs()<<"\nhead is an arg in copy\n";
                                 }
                             }
                             annotateEdge(flowEdge);
@@ -669,7 +678,7 @@ namespace {
             destNode.vertexTy=ptr;
             for (int i=0; i<l; i++) {
                 //Phi->getIncomingValue(i)->dump();
-//               errs()<<"\n ......\n";
+                //errs()<<"\n ......\n";
                 V srcNode;
                 BasicBlock *src = Phi->getIncomingBlock(i);
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
@@ -692,7 +701,7 @@ namespace {
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == destNode.name) {
-                                    errs()<<"\nhead is an arg\n";
+                                    errs()<<"\nhead is an arg in phi\n";
                                 }
                             }
                             annotateEdge(flowEdge);
@@ -747,7 +756,7 @@ namespace {
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == destNode.name) {
-                                    errs()<<"\nhead is an arg\n";
+                                    errs()<<"\nhead is an arg in store\n";
                                 }
                             }
                             annotateEdge(flowEdge);
@@ -759,9 +768,12 @@ namespace {
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *F = call->getCalledFunction();
             if(F->hasMetadata("summary")) {
+                errs()<<"From a call instruction, the function has summary already: "<<F->getName()<<"\n";
                 applySummary(*F,*call);
             } else {
+                errs()<<"From a function call, the fundtion does not already have a summary. So generating summary of:"<<F->getName()<<"\n";
                 generateFunctionSummary(*F);
+                applySummary(*F,*call);
             }
             //applySummary(F,B,I); to be implemented
         }
@@ -770,12 +782,17 @@ namespace {
             //I.dump();
             //errs()<<"\n";
             int argInx=0;
+            errs()<<"In apply summary of the function: "<<F.getName()<<"\n";
             //errs()<<"\n Function with args : " << F.getName()<<"\n";
             for (auto& A : I.args()) {
                 //if(A.get()->hasName()) {
                     Value *argValue = dyn_cast<Value>(A.get());
+                    errs()<<"Dumping call inst args of instruction : \n";
+                    I.dump();
+                    errs()<<"--->\n";
                     argValue->dump();
-                    if(isa<PointerType>(argValue->getType())) {
+                    errs()<<"-------";
+                    //if(isa<PointerType>(argValue->getType())) {
                         V argNode;
                         argNode.name=argValue;
               //          errs()<<"\n showing the argument : ";
@@ -783,7 +800,7 @@ namespace {
                         if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
                             errs()<<"\n found that actual arg is already in v list....!!!!\n";
                         }
-                    }
+                    //}
                 //}
                 argInx++;
             }
