@@ -36,7 +36,7 @@ namespace {
         static char ID;
 	    HOFG() : ModulePass(ID) {}
         enum vertexType {obj,ptr,snk}; //obj: new heap object, ptr: pointer, snk: free statement
-        enum funcType {allocator,deallocator,allocdealloc};//Summary of a function specifies the function type
+        enum funcType {allocator,deallocator,allocdealloc,noop};//Summary of a function specifies the function type
         struct V{ //Data structure to store vertices
             Value *name;
             vertexType vertexTy;
@@ -76,7 +76,7 @@ namespace {
         }HeapOFGraph;
         struct FuncSummary { //Datastructure for storing function summary
             Function *funcName; //pointer to the function
-            funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
+            mutable funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
             std::set<Value*> formalArgs; //List of formal arguments to the function
             mutable std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
             Type *retType; //return type of the function
@@ -186,10 +186,24 @@ namespace {
                 MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
                 F.setMetadata("summary",N);
                 
+                //summary.argTransforms = ; Is updated while constructHOFGfun(F) above.
                 //summary.functionType = ;
-                
-                //summary.argTransforms = ;
-                
+                if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                    fsit=allFuncSummaries.find(summary);
+//                    errs()<<fsit->argTransforms.size()<<"size after generation\n";
+                    if(fsit->argTransforms.size() < 1) {
+                        fsit->functionType=noop;
+                    } else {
+                        //if(fsit->argTransforms.contains(alloc)) {
+                        //    errs()<<"\n Contains works";
+                        //}
+                        if(find(fsit->argTransforms.begin(), fsit->argTransforms.end(), allocator) != fsit->argTransforms.end()) {
+                            
+                        } else if (find(fsit->argTransforms.begin(), fsit->argTransforms.end(), deallocator) != fsit->argTransforms.end()){
+                            errs()<<"dealloc found";
+                        }
+                    }
+                }
                 
                 }
         }
@@ -609,6 +623,13 @@ namespace {
                                 //ptrNode.name->dump();
                                 if(arg == ptrNode.name || arg == dyn_cast<Instruction>(ptrNode.name)->getOperand(0)) {
                                     errs()<<"\ntail is an arg\n";
+                                    FuncSummary summary;
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        fsit->argTransforms.push_back(deallocator);
+                                        //fsit->functionType=allocator;
+                                    }
                                 }
                             }
                             HeapOFGraph.vertices.insert(freeNode);
@@ -657,6 +678,13 @@ namespace {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == destNode.name) {
                                     errs()<<"\nhead is an arg in copy\n";
+                                    FuncSummary summary;
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        fsit->argTransforms.push_back(allocator);
+                                        //fsit->functionType=allocator;
+                                    }
                                 }
                             }
                             annotateEdge(flowEdge);
@@ -702,6 +730,13 @@ namespace {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == destNode.name) {
                                     errs()<<"\nhead is an arg in phi\n";
+                                    FuncSummary summary;
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        fsit->argTransforms.push_back(allocator);
+                                        //fsit->functionType=allocator;
+                                    }
                                 }
                             }
                             annotateEdge(flowEdge);
@@ -753,12 +788,21 @@ namespace {
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
                         //    errs()<<"\nRepeat can be detected here";
                         } else {
+                            FuncSummary summary;
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
                                 if(arg == destNode.name) {
                                     errs()<<"\nhead is an arg in store\n";
+                                    
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        fsit->argTransforms.push_back(allocator);
+                                        errs()<<fsit->argTransforms.size()<<"size\n";
+                                    }
                                 }
                             }
+                            errs()<<fsit->argTransforms.size()<<"size\n";
                             annotateEdge(flowEdge);
                 HeapOFGraph.flows.insert(flowEdge);
                         }
@@ -787,11 +831,11 @@ namespace {
             for (auto& A : I.args()) {
                 //if(A.get()->hasName()) {
                     Value *argValue = dyn_cast<Value>(A.get());
-                    errs()<<"Dumping call inst args of instruction : \n";
-                    I.dump();
-                    errs()<<"--->\n";
-                    argValue->dump();
-                    errs()<<"-------";
+                    //errs()<<"Dumping call inst args of instruction : \n";
+                    //I.dump();
+                    //errs()<<"--->\n";
+                    //argValue->dump();
+                    //errs()<<"-------";
                     //if(isa<PointerType>(argValue->getType())) {
                         V argNode;
                         argNode.name=argValue;
