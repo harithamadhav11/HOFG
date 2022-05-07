@@ -79,8 +79,8 @@ namespace {
             mutable funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
             std::set<Value*> formalArgs; //List of formal arguments to the function
             mutable std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
-            std::set<Value*> globalAlloc;//Variables that have scope outside the function that are being allocated
-            std::set<Value*> globalDealloc;//Variables that have scope outside the function that are being deallocted
+            mutable std::set<Value*> globalAlloc;//Variables that have scope outside the function that are being allocated
+            mutable std::set<Value*> globalDealloc;//Variables that have scope outside the function that are being deallocted
             Type *retType; //return type of the function
             bool operator < (const FuncSummary &other) const {return (funcName < other.funcName);}
         };
@@ -135,10 +135,14 @@ namespace {
         void printHOFG() { //To print generated HOFG
             errs()<<"\nPrinting HOFG : edges\n";
             for (F e : HeapOFGraph.flows) {
-                e.tail.name->dump();
-                errs()<<"-->";
-                e.head.name->dump();
-                errs()<<"\n";
+                //e.tail.name->dump();
+                //StringRef outfile = "out.txt";
+                //std::error_code EC;
+                //raw_fd_ostream out(outfile, EC);
+                outs()<<*(e.tail.name);
+                outs()<<"-->";
+                outs()<<*(e.head.name);
+                outs()<<"\n";
             }
             //for (R e : HeapOFGraph.derefs) {
 
@@ -146,11 +150,11 @@ namespace {
             //for (D e : HeapOFGraph.derived) {
 
             //}
-            errs()<<"\nPrinting HOFG: vertices\n";
-            for (V e : HeapOFGraph.vertices) {
-                e.name->dump();
-                errs()<<"\n";
-            }
+            //errs()<<"\nPrinting HOFG: vertices\n";
+            //for (V e : HeapOFGraph.vertices) {
+            //    e.name->dump();
+            //    errs()<<"\n";
+            //}
         }
         void constructHOFG(Function &F) {
             //for(Module::iterator MI=M.begin();MI!=M.end();++MI) {
@@ -174,7 +178,7 @@ namespace {
                 if(F.isDeclaration()) {
 
                 } else {
-                errs()<<"Generating summary of : "<<F.getName()<<"\n\n";
+                //errs()<<"Generating summary of : "<<F.getName()<<"\n\n";
                 FuncSummary summary;
                 summary.funcName = &F;
                 for(Argument &A : F.args()) {
@@ -183,10 +187,12 @@ namespace {
                 }
                 summary.retType= F.getReturnType();
                 allFuncSummaries.insert(summary);
-                constructHOFGfun(F);
                 LLVMContext& C=F.getContext();
                 MDNode* N=MDNode::get(C, MDString::get(C,"summary generated"));
                 F.setMetadata("summary",N);
+                constructHOFGfun(F);
+                
+                
                 
                 //summary.argTransforms = ; Is updated while constructHOFGfun(F) above.
                 //summary.functionType = ;
@@ -199,10 +205,14 @@ namespace {
                         //if(fsit->argTransforms.contains(alloc)) {
                         //    errs()<<"\n Contains works";
                         //}
-                        if(find(fsit->argTransforms.begin(), fsit->argTransforms.end(), allocator) != fsit->argTransforms.end()) {
-                            
-                        } else if (find(fsit->argTransforms.begin(), fsit->argTransforms.end(), deallocator) != fsit->argTransforms.end()){
-                            errs()<<"dealloc found";
+                        if((find(fsit->argTransforms.begin(), fsit->argTransforms.end(), allocator) != fsit->argTransforms.end()) && 
+                        find(fsit->argTransforms.begin(), fsit->argTransforms.end(), deallocator) != fsit->argTransforms.end()) {
+                            fsit->functionType=allocdealloc;
+                        } else if ((find(fsit->argTransforms.begin(), fsit->argTransforms.end(), deallocator) != fsit->argTransforms.end())){
+                            //errs()<<"dealloc found";
+                            fsit->functionType=deallocator;
+                        } else if (find(fsit->argTransforms.begin(), fsit->argTransforms.end(), allocator) != fsit->argTransforms.end()) {
+                            fsit->functionType=allocator;
                         }
                     }
                 }
@@ -335,8 +345,8 @@ namespace {
                             if(F->getName() == MALLOC|| F->getName() == "u_calloc") {
                                 return true;
                             } else if (F->getName() ==  "xmalloc") {
-                                F->setName("malloc");
-                                return true;
+                                //F->setName("malloc");
+                                //return true;
                             }
                         }  else {
                         }
@@ -455,18 +465,16 @@ namespace {
         Output : Annotate the flow edge with the conditions to be satisfied for the program to execute the statement represented by the edge.
         */
         void annotateEdge(F flowEdge) {
-            //if(isa<GlobalVariable>(flowEdge.head.name)) {
-                
-            //} else {
-            //    errs()<<"Did not identify";
-            //    flowEdge.head.name->dump();
-            //    BasicBlock *head = dyn_cast<Instruction>(flowEdge.head.name)->getParent();
-            //}
-            //errs()<<"................................";
-            //flowEdge.tail.name->dump();
-            //errs()<<".................................\n";
-            BasicBlock *tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
-            
+            BasicBlock *tail;
+            if(isa<GlobalVariable>(flowEdge.tail.name)) {
+                if(isa<GlobalVariable>(flowEdge.head.name)) {
+                    
+                } else {
+                    tail= dyn_cast<Instruction>(flowEdge.head.name)->getParent();
+                }
+            } else if(isa<GlobalVariable>(flowEdge.head.name)) {
+                tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
+            }
             predBB fromBB;
             fromBB.bb = tail;
             if(allBBs.find(fromBB) != allBBs.end()) {
@@ -520,7 +528,7 @@ namespace {
             //HeapOFGraph.vertices.insert(objNode);
             Type *ty = I.getFunction()->getReturnType();
             if(ty->isPointerTy()) {
-                //errs()<<"\n Void type return for this malloc\n";
+                //errs()<<"\n Pointer type return for this malloc\n";
             } else {
                 //errs()<<"\n did not detect void\n";
             }
@@ -545,7 +553,7 @@ namespace {
                             //    Value* arg = dyn_cast<Value>(&A);
                                 //if(arg == ptrNode.name) {
                                     if(isa<Argument>(ptrNode.name)) {
-                                    errs()<<"\nhead is an arg in malloc\n";
+                                    //errs()<<"\nhead is an arg in malloc\n";
                                     FuncSummary summary;
                                     summary.funcName = I.getFunction();
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
@@ -573,9 +581,11 @@ namespace {
                             //errs()<<"\n Its already here ...";
                             //ptrNode.name->dump();
                         }
+                    } else if(isa<ReturnInst>(Ins)) {
+                        //To do: add appropriate vetices and edges
                     }
                 } else {
-                    HeapOFGraph.vertices.insert(objNode); //malloc funciton is calle, but not used
+                    HeapOFGraph.vertices.insert(objNode); //malloc funciton is called, but not used
                 }
             }
         }
@@ -625,13 +635,31 @@ namespace {
                                 //arg->dump();
                                 //ptrNode.name->dump();
                                 if(isa<Argument>(ptrNode.name) || isa<Argument>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
-                                    errs()<<"\ntail is an arg\n";
+                                    //errs()<<"\ntail is an arg\n";
                                     FuncSummary summary;
                                     summary.funcName = I.getFunction();
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                         fsit = allFuncSummaries.find(summary);
                                         fsit->argTransforms.push_back(deallocator);
                                         //fsit->functionType=allocator;
+                                    }
+                                } else if(isa<GlobalVariable>(ptrNode.name)) {
+                                    //This is a deallocation of a global variable
+                                    FuncSummary summary;
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        fsit->globalDealloc.insert(ptrNode.name);
+                                        //errs()<<"Global value deallocated";
+                                    }
+                                } else if(isa<GlobalVariable>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
+                                    FuncSummary summary;
+                                    summary.funcName = I.getFunction();
+                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                        fsit = allFuncSummaries.find(summary);
+                                        Value *v=dyn_cast<Value>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0));
+                                        fsit->globalDealloc.insert(v);
+                                        //errs()<<"Global value deallocated";
                                     }
                                 }
                             //}
@@ -680,7 +708,7 @@ namespace {
                             //for(Argument &A : I.getFunction()->args()) {
                             //    Value* arg = dyn_cast<Value>(&A);
                                 if(isa<Argument>(destNode.name)) {
-                                    errs()<<"\nhead is an arg in copy\n";
+                                    //errs()<<"\nhead is an arg in copy\n";
                                     FuncSummary summary;
                                     summary.funcName = I.getFunction();
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
@@ -690,8 +718,19 @@ namespace {
                                     }
                                 }
                             //}
-                            annotateEdge(flowEdge);
-                HeapOFGraph.flows.insert(flowEdge);
+                            if(isa<GlobalVariable>(flowEdge.head.name) && isa<GlobalVariable>(flowEdge.tail.name)) {
+                                predBB fromBB;
+                                fromBB.bb =&B;
+                                if(allBBs.find(fromBB) != allBBs.end()) {
+                                    fromBB = *(allBBs.find(fromBB));
+                                    for (Value *c : fromBB.entriConditions) {
+                                        flowEdge.conditions.insert(c);
+                                    }
+                                }
+                            } else {
+                                annotateEdge(flowEdge);
+                            }
+                            HeapOFGraph.flows.insert(flowEdge);
                         }
             } else {
                 //errs()<<"\n Found as not an exising vertex!!!";
@@ -732,7 +771,7 @@ namespace {
                             //for(Argument &A : I.getFunction()->args()) {
                             //    Value* arg = dyn_cast<Value>(&A);
                                 if(isa<Argument>(destNode.name)) {
-                                    errs()<<"\nhead is an arg in phi\n";
+                                    //errs()<<"\nhead is an arg in phi\n";
                                     FuncSummary summary;
                                     summary.funcName = I.getFunction();
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
@@ -778,11 +817,11 @@ namespace {
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(storIns->getOperand(1));
                 if(dyn_cast<Argument>(storIns->getOperand(1))) {
-                    errs()<<"\nIts global";
+                //    errs()<<"\nIts global";
                 } else if(dyn_cast<Instruction>(storIns->getOperand(1))){
-                    errs()<<"\nIts an instruction";
+                //    errs()<<"\nIts an instruction";
                 } else {
-                    errs()<<"\nNot casted";
+                //    errs()<<"\nNot casted";
                 }
                 destNode.vertexTy=ptr;
                 if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
@@ -802,15 +841,24 @@ namespace {
                     //for(Argument &A : I.getFunction()->args()) {
                     //    Value* arg = dyn_cast<Value>(&A);
                     //    if(arg == destNode.name) {
-                        if(isa<Argument>(destNode.name)) {
-                            errs()<<"\nhead is an arg in store\n";
-                            summary.funcName = I.getFunction();
-                            if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
-                                fsit = allFuncSummaries.find(summary);
-                                fsit->argTransforms.push_back(allocator);
-                                //errs()<<fsit->argTransforms.size()<<"size\n";
-                            }
+                    if(isa<Argument>(destNode.name)) {
+                       // errs()<<"\nhead is an arg in store\n";
+                        summary.funcName = I.getFunction();
+                        if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                            fsit = allFuncSummaries.find(summary);
+                            fsit->argTransforms.push_back(allocator);
+                        //    errs()<<fsit->argTransforms.size()<<"size\n";
                         }
+                    }
+                    if(isa<GlobalVariable>(destNode.name)) {
+                        summary.funcName = I.getFunction();
+                        if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                            fsit = allFuncSummaries.find(summary);
+                            Value *v = dyn_cast<Value>(storIns->getOperand(1));
+                            fsit->globalAlloc.insert(v);
+                            //errs()<<"\nglobal value allocated for function : "<<I.getFunction()->getName();
+                        }
+                    }
                     //    }
                     //}
                     //errs()<<fsit->argTransforms.size()<<"size\n";
@@ -822,19 +870,24 @@ namespace {
         void applyFunctionSummary(BasicBlock &B, Instruction &I) {
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *F = call->getCalledFunction();
-            if(F->hasMetadata("summary")) {
-                errs()<<"From a call instruction, the function has summary already: "<<F->getName()<<"\n";
-                applySummary(*F,*call);
+            Function *caller = I.getFunction();
+            if(caller == F) {
+                //errs()<<"Recursive";
             } else {
-                errs()<<"From a function call, the function does not already have a summary. So generating summary of:"<<F->getName()<<"\n";
-                generateFunctionSummary(*F);
-                applySummary(*F,*call);
+                if(F->hasMetadata("summary")) {
+                    //errs()<<"From a call instruction, the function has summary already: "<<F->getName()<<"\n";
+                    applySummary(*F,*call);
+                } else {
+                    //errs()<<"From a function call, the function does not already have a summary. So generating summary of:"<<F->getName()<<"\n";
+                    generateFunctionSummary(*F);
+                    applySummary(*F,*call);
+                }
             }
             //applySummary(F,B,I); to be implemented
         }
         void applySummary(Function &F, CallInst &I) {
             //int argInx=0;
-            errs()<<"In apply summary of the function: "<<F.getName()<<"\n";
+            //errs()<<"In apply summary of the function: "<<F.getName()<<"\n";
             //To do: Check the function summary.
             //1. summary.functionType : allocator,deallocator
             //2. summary.returnType : return value may be pointer to a newly allocated heap object.
@@ -846,11 +899,25 @@ namespace {
                 fsit = allFuncSummaries.find(summary);
                 summary=*fsit;
             }
-            if(isa<PointerType>(*summary.retType)) {
-                errs()<<"\nPtr type return value\n";
+            if(isa<PointerType>(*(summary.retType))) {
+            //    errs()<<"\nPtr type return value\n";
+                if(summary.functionType == allocator) {
+                    errs()<<"\n This function allocates through return value";
+                }
+            } else if(summary.functionType == allocator) {
+                if(summary.argTransforms.size() > 0) {
+            //    errs()<<"\nArg transforms detected\n";
+                    errs()<<"\nThis functin alloctes through args";
+                }
             }
             if(summary.argTransforms.size() > 0) {
-                errs()<<"\nArg transforms detected\n";
+            //    errs()<<"\nArg transforms detected\n";
+            }
+            if(summary.globalAlloc.size() > 0) {
+            //    errs()<<"\nglobal value is allocated";
+            }
+            if(summary.globalDealloc.size() > 0) {
+            //    errs()<<"\nglobal value is deallocated";
             }
 
         }
