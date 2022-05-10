@@ -11,3 +11,4 @@
 #define STORE 8
 #define PHI_COPY 9
 #define FUNC_CALL 10
+#define RET 11

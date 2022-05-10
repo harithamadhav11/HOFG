@@ -48,6 +48,8 @@ namespace {
             V head;
             V tail;
             std::set<Value*> conditions;
+            std::list<int> callSite;
+            //std::list<int> lineNumber;
             bool operator < (const F &other) const {return ((head < other.head) || (tail < other.tail));}
             bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
@@ -77,11 +79,12 @@ namespace {
         struct FuncSummary { //Datastructure for storing function summary
             Function *funcName; //pointer to the function
             mutable funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
-            std::set<Value*> formalArgs; //List of formal arguments to the function
+            mutable std::set<Value*> formalArgs; //List of formal arguments to the function
             mutable std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
             mutable std::set<Value*> globalAlloc;//Variables that have scope outside the function that are being allocated
             mutable std::set<Value*> globalDealloc;//Variables that have scope outside the function that are being deallocted
             Type *retType; //return type of the function
+            mutable std::set<Value*> returnValues;
             bool operator < (const FuncSummary &other) const {return (funcName < other.funcName);}
         };
         struct predBB { //Storing conditins and predecessors
@@ -324,6 +327,9 @@ namespace {
                 if(identifyFunctionCall(I)) {
                     handleRelevantCodeSegment(FUNC_CALL, B, I);
                 }
+                if(identifyReturn(I)) {
+                    handleRelevantCodeSegment(RET,B,I);
+                }
                // handleRelevantCodeSegment(I.getOpcode(), B);
             }
         }
@@ -459,6 +465,16 @@ namespace {
             //}
             return false;
         }
+        bool identifyReturn(Instruction &I) {
+            if(isa<ReturnInst>(&I)){
+                if(I.getNumOperands() < 1) {
+                } else {
+                    return true;
+                }
+                return false;
+            }
+            return false;
+        }
         /*
         Function : annotateEdge (F flowEdge)
         Input : the flow edge of the HOFG
@@ -514,7 +530,9 @@ namespace {
                                 break;
                 case PHI_COPY : addPhiInstruction(B,I); //implemented
                                 break;
-                case FUNC_CALL : applyFunctionSummary(B,I); //Ongoing
+                case FUNC_CALL :applyFunctionSummary(B,I); //Ongoing
+                                break;
+                case RET :      addReturn(B,I);
                                 break;
                 default : errs()<<"\ninvalid instruction"<<option;
             }
@@ -867,6 +885,17 @@ namespace {
                 }
             }
         }
+        void addReturn(BasicBlock &B, Instruction &I) {
+            Function *F=I.getFunction();
+            if(F->hasMetadata("summary")) {
+                FuncSummary summary;
+                summary.funcName=F;
+                if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                    fsit = allFuncSummaries.find(summary);
+                    fsit->returnValues.insert(dyn_cast<Value>(I.getOperand(0)));
+                }
+            }
+        }
         void applyFunctionSummary(BasicBlock &B, Instruction &I) {
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *F = call->getCalledFunction();
@@ -892,6 +921,7 @@ namespace {
             //1. summary.functionType : allocator,deallocator
             //2. summary.returnType : return value may be pointer to a newly allocated heap object.
             //3. summary.argTransforms : whether any arguments are being allocated or deallocated.
+            //4. summary.returnValues : if a function returns pointer(s)
             //According to allocator or deallocator, for each function call, we need to create new nodes, using the function summary.
             FuncSummary summary;
             summary.funcName=&F;
@@ -902,12 +932,12 @@ namespace {
             if(isa<PointerType>(*(summary.retType))) {
             //    errs()<<"\nPtr type return value\n";
                 if(summary.functionType == allocator) {
-                    errs()<<"\n This function allocates through return value";
+                    errs()<<"\nThis function allocates through return value";
                 }
             } else if(summary.functionType == allocator) {
                 if(summary.argTransforms.size() > 0) {
             //    errs()<<"\nArg transforms detected\n";
-                    errs()<<"\nThis functin alloctes through args";
+                    errs()<<"\nThis function allocates through args";
                 }
             }
             if(summary.argTransforms.size() > 0) {
@@ -919,6 +949,13 @@ namespace {
             if(summary.globalDealloc.size() > 0) {
             //    errs()<<"\nglobal value is deallocated";
             }
+            if(summary.returnValues.size() > 0) {
+                addReturnToCallSite(I,fsit);
+            //    errs()<<"\nPointer type return values detected";
+            }
+        }
+        void addReturnToCallSite(CallInst &I,std::set<FuncSummary>::iterator fsit ) {
+            errs()<<"Arrived in return handler";
 
         }
         void traverseCallGraph(Module &M) {
