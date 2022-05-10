@@ -895,6 +895,7 @@ namespace {
                     fsit->returnValues.insert(dyn_cast<Value>(I.getOperand(0)));
                 }
             }
+
         }
         void applyFunctionSummary(BasicBlock &B, Instruction &I) {
             CallInst *call=dyn_cast<CallInst>(&I);
@@ -932,12 +933,12 @@ namespace {
             if(isa<PointerType>(*(summary.retType))) {
             //    errs()<<"\nPtr type return value\n";
                 if(summary.functionType == allocator) {
-                    errs()<<"\nThis function allocates through return value";
+                    //errs()<<"\nThis function allocates through return value";
                 }
             } else if(summary.functionType == allocator) {
                 if(summary.argTransforms.size() > 0) {
             //    errs()<<"\nArg transforms detected\n";
-                    errs()<<"\nThis function allocates through args";
+                    //errs()<<"\nThis function allocates through args";
                 }
             }
             if(summary.argTransforms.size() > 0) {
@@ -955,8 +956,24 @@ namespace {
             }
         }
         void addReturnToCallSite(CallInst &I,std::set<FuncSummary>::iterator fsit ) {
-            errs()<<"Arrived in return handler";
-
+            FuncSummary summary;
+            summary=*fsit;
+            V retNode, receiverNode;
+            receiverNode.name=dyn_cast<Value>(&I);
+            if(HeapOFGraph.vertices.find(receiverNode) != HeapOFGraph.vertices.end()) {
+                receiverNode=*(HeapOFGraph.vertices.find(receiverNode));
+            }
+            for(Value *ret : summary.returnValues) {
+                retNode.name=ret;
+                if(HeapOFGraph.vertices.find(retNode) != HeapOFGraph.vertices.end()) {
+                    retNode=*(HeapOFGraph.vertices.find(retNode));
+                }
+            }
+            F flowEdge;
+            flowEdge.head=receiverNode;
+            flowEdge.tail=retNode;
+            annotateEdge(flowEdge);
+            HeapOFGraph.flows.insert(flowEdge);
         }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
