@@ -48,11 +48,11 @@ namespace {
             V head;
             V tail;
             std::set<Value*> conditions;
-            std::list<int> callSite;
+            int callSite;
             //std::list<int> lineNumber;
             bool operator < (const F &other) const {return ((head < other.head) || (tail < other.tail));}
             bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
-            bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail));}
+            bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail) && (callSite==other.callSite));}
         };
         struct R { //Data structure to store dereference edges
             V head;
@@ -667,7 +667,7 @@ namespace {
                                     summary.funcName = I.getFunction();
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                         fsit = allFuncSummaries.find(summary);
-                                        fsit->globalDealloc.insert(ptrNode.name);
+                                        fsit->globalDealloc.insert(freeNode.name);
                                         //errs()<<"Global value deallocated";
                                     }
                                 } else if(isa<GlobalVariable>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
@@ -675,7 +675,7 @@ namespace {
                                     summary.funcName = I.getFunction();
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                         fsit = allFuncSummaries.find(summary);
-                                        Value *v=dyn_cast<Value>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0));
+                                        Value *v=dyn_cast<Value>(dyn_cast<Instruction>(freeNode.name)->getOperand(0));
                                         fsit->globalDealloc.insert(v);
                                         //errs()<<"Global value deallocated";
                                     }
@@ -695,6 +695,17 @@ namespace {
                         //Ins.dump();
                         //Ins.getOperand(0)->dump();
                         //To be handled for two level pointers
+                    } else {
+                        ptrNode.name=dyn_cast<Value>(&Ins);
+                        if (HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
+                            ptrNode=*(HeapOFGraph.vertices.find(ptrNode));
+                            F flowEdge;
+                            flowEdge.tail=ptrNode;
+                            flowEdge.head=freeNode;
+                            HeapOFGraph.vertices.insert(freeNode);
+                            annotateEdge(flowEdge); 
+                            HeapOFGraph.flows.insert(flowEdge);
+                        }
                     }
                 }
             }
@@ -872,8 +883,8 @@ namespace {
                         summary.funcName = I.getFunction();
                         if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                             fsit = allFuncSummaries.find(summary);
-                            Value *v = dyn_cast<Value>(storIns->getOperand(1));
-                            fsit->globalAlloc.insert(v);
+                            //Value *v = dyn_cast<Value>(storIns->getOperand(1));
+                            fsit->globalAlloc.insert(dyn_cast<Value>(storIns));
                             //errs()<<"\nglobal value allocated for function : "<<I.getFunction()->getName();
                         }
                     }
@@ -945,9 +956,11 @@ namespace {
             //    errs()<<"\nArg transforms detected\n";
             }
             if(summary.globalAlloc.size() > 0) {
+                addGlobalAlloc(summary.globalAlloc);
             //    errs()<<"\nglobal value is allocated";
             }
             if(summary.globalDealloc.size() > 0) {
+                addGlobalDealloc(summary.globalDealloc);
             //    errs()<<"\nglobal value is deallocated";
             }
             if(summary.returnValues.size() > 0) {
@@ -974,6 +987,62 @@ namespace {
             flowEdge.tail=retNode;
             annotateEdge(flowEdge);
             HeapOFGraph.flows.insert(flowEdge);
+        }
+        void addGlobalDealloc(std::set<Value*> deallocSet) {
+            //errs()<<"Global dealloc detected: ";
+            //Value *dealloc=*deallocSet.begin();
+            //dealloc->dump();
+            for(Value *deallocIns : deallocSet) {
+                V freeNode,globalNode;
+                freeNode.name=deallocIns;
+                if(HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
+                    freeNode=*(HeapOFGraph.vertices.find(freeNode));
+                }
+                Value *v=dyn_cast<Value>(dyn_cast<Instruction>(freeNode.name)->getOperand(0));
+                globalNode.name=v;//dyn_cast<Value>(dyn_cast<Instruction>(deallocIns->getOperand(0)));
+                if(HeapOFGraph.vertices.find(globalNode) != HeapOFGraph.vertices.end()) {
+                    globalNode=*(HeapOFGraph.vertices.find(globalNode));
+                }
+                F flowEdge;
+                flowEdge.head=freeNode;
+                flowEdge.tail=globalNode;
+                annotateEdge(flowEdge);
+                HeapOFGraph.flows.insert(flowEdge);
+            }
+        }
+        void addGlobalAlloc(std::set<Value*> allocSet) {
+            //errs()<<"Global alloc detected: ";
+            //Value *alloc=*allocSet.begin();
+            //alloc->dump();
+            for(Value *allocIns : allocSet) {
+                V globalNode,ptrNode,objNode;
+                F flowEdge1,flowEdge2;
+                Value *v=dyn_cast<Value>(dyn_cast<Instruction>(allocIns)->getOperand(1));
+                globalNode.name=v;//dyn_cast<Value>(dyn_cast<Instruction>(deallocIns->getOperand(0)));
+                if(HeapOFGraph.vertices.find(globalNode) != HeapOFGraph.vertices.end()) {
+                    globalNode=*(HeapOFGraph.vertices.find(globalNode));
+                }
+                if(BitCastInst *bcI = dyn_cast<BitCastInst>((dyn_cast<Instruction>(allocIns))->getOperand(0))) {
+                    if(CallInst *call = dyn_cast<CallInst>(bcI->getOperand(0))) {
+                        objNode.name=dyn_cast<Value>(call);
+                        if(HeapOFGraph.vertices.find(objNode) != HeapOFGraph.vertices.end()) {
+                            objNode=*(HeapOFGraph.vertices.find(objNode));
+                        }
+                    }
+                    ptrNode.name=dyn_cast<Value>(bcI);
+                    if(HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
+                        ptrNode=*(HeapOFGraph.vertices.find(ptrNode));
+                    }
+                }
+                flowEdge1.tail=objNode;
+                flowEdge1.head=ptrNode;
+                flowEdge2.tail=ptrNode;
+                flowEdge2.head=globalNode;
+                annotateEdge(flowEdge1);
+                annotateEdge(flowEdge2);
+                HeapOFGraph.flows.insert(flowEdge1);
+                HeapOFGraph.flows.insert(flowEdge2);
+            }
         }
         void traverseCallGraph(Module &M) {
             //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
