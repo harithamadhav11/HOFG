@@ -68,7 +68,7 @@ namespace {
             bool operator > (const D &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const D &other) const {return ((head == other.head) && (tail == other.tail));}
         };
-        struct HOFGraph { //The graph HOFG of the input program is stored in HeapOfGraph
+        struct HOFGraph { //The graph HOFG of the input program is stored in HeapOFGraph
             std::set<V> vertices;
             std::set<F> flows;
             std::set<R> derefs;
@@ -123,6 +123,7 @@ namespace {
             Output: HOFG of the module*/
             //HOFGraph P;
             //do {
+            //    errs()<<"\n iteration of hofg";
             //    P=HeapOFGraph;
                 generateSummary(M); // Call to generateSummary function, with argument module.
             //} while (! (HeapOFGraph == P));
@@ -330,6 +331,9 @@ namespace {
                 if(identifyReturn(I)) {
                     handleRelevantCodeSegment(RET,B,I);
                 }
+                if(identifyBitCast(I)) {
+                    handleRelevantCodeSegment(BIT_CAST,B,I);
+                }
                // handleRelevantCodeSegment(I.getOpcode(), B);
             }
         }
@@ -475,6 +479,13 @@ namespace {
             }
             return false;
         }
+
+        bool identifyBitCast(Instruction &I) {
+            if(isa<BitCastInst>(&I)) {
+                return true;
+            }
+            return false;
+        }
         /*
         Function : annotateEdge (F flowEdge)
         Input : the flow edge of the HOFG
@@ -484,12 +495,18 @@ namespace {
             BasicBlock *tail;
             if(isa<GlobalVariable>(flowEdge.tail.name)) {
                 if(isa<GlobalVariable>(flowEdge.head.name)) {
-                    
+                    errs()<<"global to global";
                 } else {
                     tail= dyn_cast<Instruction>(flowEdge.head.name)->getParent();
                 }
             } else if(isa<GlobalVariable>(flowEdge.head.name)) {
-                tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
+                if(isa<Argument>(flowEdge.tail.name)){
+                    tail = &(dyn_cast<Argument>(flowEdge.tail.name)->getParent()->getEntryBlock());
+                } else {
+                    tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
+                }
+            } else if(isa<Argument>(flowEdge.tail.name)){
+                tail = &(dyn_cast<Argument>(flowEdge.tail.name)->getParent()->getEntryBlock());
             }
             predBB fromBB;
             fromBB.bb = tail;
@@ -533,6 +550,8 @@ namespace {
                 case FUNC_CALL :applyFunctionSummary(B,I); //Ongoing
                                 break;
                 case RET :      addReturn(B,I);
+                                break;
+                case BIT_CAST : addCopy(B,I);
                                 break;
                 default : errs()<<"\ninvalid instruction"<<option;
             }
@@ -713,6 +732,7 @@ namespace {
         void addCopy(BasicBlock &B, Instruction &I) {
             V srcNode, destNode;
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
+            //I.getOperand(0)->dump();
             srcNode.vertexTy=ptr;
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
                 //errs()<<"\n Inside copy : of ";
@@ -781,6 +801,9 @@ namespace {
                 V srcNode;
                 //BasicBlock *src = Phi->getIncomingBlock(i);
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
+                if(isa<Argument>(srcNode.name)) {
+                    errs()<<"\n phi src detected but not catched";
+                }
                 if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
                     //errs()<<"\n Found an existing node !!! \n";
                     if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
@@ -808,6 +831,9 @@ namespace {
                                         fsit->argTransforms.push_back(allocator);
                                         //fsit->functionType=allocator;
                                     }
+                                }
+                                if(isa<Argument>(srcNode.name)) {
+                                    errs()<<"\nSource of phi instruction is an argument";
                                 }
                             //}
                             annotateEdge(flowEdge);
@@ -888,6 +914,9 @@ namespace {
                             //errs()<<"\nglobal value allocated for function : "<<I.getFunction()->getName();
                         }
                     }
+                    if(isa<Argument>(srcNode.name)) {
+                        errs()<<"\n source node of store is argument";
+                    }
                     //    }
                     //}
                     //errs()<<fsit->argTransforms.size()<<"size\n";
@@ -910,18 +939,47 @@ namespace {
         }
         void applyFunctionSummary(BasicBlock &B, Instruction &I) {
             CallInst *call=dyn_cast<CallInst>(&I);
-            Function *F = call->getCalledFunction();
+            Function *Fun = call->getCalledFunction();
             Function *caller = I.getFunction();
-            if(caller == F) {
+            if(caller == Fun) {
                 //errs()<<"Recursive";
             } else {
-                if(F->hasMetadata("summary")) {
+                if(!call->args().empty()) {
+                    int i,iterator=0;
+                    V actualArgNode,formalArgNode;
+                    for(Value *A : call->args()) {
+                        i=iterator; 
+                        for(Argument &B : Fun->args()) {
+                            if(i==0) {
+                                formalArgNode.name=dyn_cast<Value>(&B);
+                            } else {
+                                i--;
+                                continue;
+                            }
+                        }
+                        actualArgNode.name=A;
+                        if(HeapOFGraph.vertices.find(actualArgNode) != HeapOFGraph.vertices.end()) {
+                            if(HeapOFGraph.vertices.find(formalArgNode) != HeapOFGraph.vertices.end()) {
+                                formalArgNode=*(HeapOFGraph.vertices.find(formalArgNode));
+                            } else {
+                                formalArgNode.vertexTy=ptr;
+                                HeapOFGraph.vertices.insert(formalArgNode);
+                            }
+                            F flowEdge;
+                            flowEdge.tail=actualArgNode;
+                            flowEdge.head=formalArgNode;
+                            HeapOFGraph.flows.insert(flowEdge);
+                        }
+                        iterator++;
+                    }
+                }
+                if(Fun->hasMetadata("summary")) {
                     //errs()<<"From a call instruction, the function has summary already: "<<F->getName()<<"\n";
-                    applySummary(*F,*call);
+                    applySummary(*Fun,*call);
                 } else {
                     //errs()<<"From a function call, the function does not already have a summary. So generating summary of:"<<F->getName()<<"\n";
-                    generateFunctionSummary(*F);
-                    applySummary(*F,*call);
+                    generateFunctionSummary(*Fun);
+                    applySummary(*Fun,*call);
                 }
             }
             //applySummary(F,B,I); to be implemented
@@ -947,13 +1005,27 @@ namespace {
                     //errs()<<"\nThis function allocates through return value";
                 }
             } else if(summary.functionType == allocator) {
-                if(summary.argTransforms.size() > 0) {
+                //if(summary.argTransforms.size() > 0) {
             //    errs()<<"\nArg transforms detected\n";
-                    //errs()<<"\nThis function allocates through args";
-                }
+                    for(funcType t: summary.argTransforms) {
+                        if(t==allocator) {
+                            errs()<<"\n Allocator detected";
+                            //To do: add edge from formal arg to actual arg
+                        } else if (t==deallocator) {
+                            errs()<<"\nDeallocator detected";
+                        } else if (t==noop) {
+                            errs()<<"\nnoop detected";
+                        }
+                    }
+                //}
             }
             if(summary.argTransforms.size() > 0) {
             //    errs()<<"\nArg transforms detected\n";
+                for(funcType t: summary.argTransforms) {
+                    if (t==deallocator) {
+                        errs()<<"\nDeallocator detected";
+                    }
+                }
             }
             if(summary.globalAlloc.size() > 0) {
                 addGlobalAlloc(summary.globalAlloc);
@@ -975,6 +1047,9 @@ namespace {
             receiverNode.name=dyn_cast<Value>(&I);
             if(HeapOFGraph.vertices.find(receiverNode) != HeapOFGraph.vertices.end()) {
                 receiverNode=*(HeapOFGraph.vertices.find(receiverNode));
+            } else {
+                receiverNode.vertexTy=ptr;
+                HeapOFGraph.vertices.insert(receiverNode);
             }
             for(Value *ret : summary.returnValues) {
                 retNode.name=ret;
@@ -1027,21 +1102,24 @@ namespace {
                         objNode.name=dyn_cast<Value>(call);
                         if(HeapOFGraph.vertices.find(objNode) != HeapOFGraph.vertices.end()) {
                             objNode=*(HeapOFGraph.vertices.find(objNode));
+                            
                         }
                     }
                     ptrNode.name=dyn_cast<Value>(bcI);
                     if(HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
                         ptrNode=*(HeapOFGraph.vertices.find(ptrNode));
+                        
                     }
+                    flowEdge1.tail=objNode;
+                            flowEdge1.head=ptrNode;
+                            annotateEdge(flowEdge1);
+                            HeapOFGraph.flows.insert(flowEdge1);
+                            flowEdge2.tail=ptrNode;
+                        flowEdge2.head=globalNode;
+                        annotateEdge(flowEdge2);
+                        HeapOFGraph.flows.insert(flowEdge2);
                 }
-                flowEdge1.tail=objNode;
-                flowEdge1.head=ptrNode;
-                flowEdge2.tail=ptrNode;
-                flowEdge2.head=globalNode;
-                annotateEdge(flowEdge1);
-                annotateEdge(flowEdge2);
-                HeapOFGraph.flows.insert(flowEdge1);
-                HeapOFGraph.flows.insert(flowEdge2);
+                
             }
         }
         void traverseCallGraph(Module &M) {
