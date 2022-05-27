@@ -194,10 +194,7 @@ namespace {
             for(HOFGpath p : pathSet) {
                 for(F flowEdge : HeapOFGraph.flows) {
                     if(flowEdge.tail == p.start) {
-                        errs()<<"\nstarting from : \n";
-                        flowEdge.tail.name->dump();
                         addToPath(flowEdge,&p);
-                        errs()<<"\nEnd\n";
 //                        errs()<<"\n Identified as a path head from flows in the graph";
                     }
                 }
