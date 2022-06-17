@@ -98,10 +98,11 @@ namespace {
             V start;
             V end;
             mutable std::set<F>pathEdge;
-            bool operator == (const HOFGpath &other) const {return ((start == other.start) && (end == other.end) && (pathEdge == other.pathEdge));}
-            bool operator < (const HOFGpath &other) const {return ((start < other.start) || (end < other.end) || (pathEdge < other.pathEdge));}
+            bool operator == (const HOFGpath &other) const {return ((start == other.start) && (pathEdge == other.pathEdge));}
+            bool operator < (const HOFGpath &other) const {return ((start < other.start) || (pathEdge < other.pathEdge));}
         };
-        std::set<HOFGpath> pathSet;
+        mutable std::set<HOFGpath> pathSet;
+        std::set<HOFGpath>::iterator psit;
         std::set<FuncSummary> allFuncSummaries; //set of all function summaries
         std::set<FuncSummary>::iterator fsit;
         std::set<V>::iterator vit;
@@ -144,6 +145,7 @@ namespace {
             */
             printHOFG();
             generatePaths();
+            printPaths();
             //traverseCallGraph(M);
             return true;
 	    };
@@ -156,7 +158,7 @@ namespace {
                     allocationSites++;
                 }
             }
-            errs()<<"\nNumber of allocation sites : "<<allocationSites<<"\n";
+            //errs()<<"\nNumber of allocation sites : "<<allocationSites<<"\n";
             for (F e : HeapOFGraph.flows) {
                 //e.tail.name->dump();
                 //StringRef outfile = "out.txt";
@@ -184,6 +186,25 @@ namespace {
             //}
         }
         /*
+        Function : print the paths in the HOFG
+        Input : The pathSet structure instance in the program
+        Output : List of paths generated from the graph is printed
+       */
+        void printPaths() {
+            errs()<<"\nNumber of paths:"<<pathSet.size()<<"\n";
+            for(HOFGpath p : pathSet) {
+                outs()<<"\n Starting from : ";
+                outs()<<*(p.start.name);
+                outs()<<"\nPath edge size: "<<p.pathEdge.size()<<"\n";
+                for (F flowEdge : p.pathEdge) {
+                    outs()<<"-->";
+                    outs()<<*(flowEdge.head.name);
+                    outs()<<"\n";
+                }
+                outs()<<"\nEnd of path";
+            }
+        }
+        /*
         Function : generate paths from obj to free nodes in the HOFG
         Input : The HeapOFGraph sturct instance in the program
         Output : List of paths generated from the graph.
@@ -191,27 +212,95 @@ namespace {
         */
         void generatePaths() {
             generatePathHeads();
+            errs()<<"\nPathheads generated. \n";
+            int count=0;
+//            HOFGpath* newPath;
+            errs()<<"\nInitially path heads count:"<<pathSet.size()<<"\n";
             for(HOFGpath p : pathSet) {
+                errs()<<"\npathSet count becomes :"<<pathSet.size()<<"\n";
+                if(pathSet.size()>20) {
+                    break;
+                }
+                psit=pathSet.find(p);
+                count=0;
+                //(*psit).start.name->dump();
                 for(F flowEdge : HeapOFGraph.flows) {
-                    if(flowEdge.tail == p.start) {
-                        addToPath(flowEdge,&p);
-//                        errs()<<"\n Identified as a path head from flows in the graph";
+                    if(flowEdge.tail == (*psit).start) {
+                        //errs()<<"\nEdge that is matched with start :";
+                        //flowEdge.tail.name->dump();
+                        //errs()<<"-->";
+                        //flowEdge.head.name->dump();
+                        //errs()<<"\nWith condition";
+                        //for(auto c : flowEdge.conditions) {
+                        //    c->dump();
+                        //}
+                        //errs()<<",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,";
+                        if(count > 0) {
+                            //errs()<<"\nThen it is here";
+                            HOFGpath nextPath;
+                            nextPath = *(psit);
+                            nextPath.pathEdge.insert(flowEdge);
+                            if(pathSet.find(nextPath)!=pathSet.end()) {
+                                //errs()<<"\nfound path from";
+                                //nextPath.start.name->dump();
+                                //errs()<<"\n to :";
+                                //for(F flow : nextPath.pathEdge) {
+                                //    flow.head.name->dump();
+                                //}
+                                //errs()<<"\n.........";
+                            } else {
+                                pathSet.insert(nextPath);
+                            }
+                        } else {
+                            //errs()<<"\nFirst it is here";
+                            //newPath=*(psit);
+                            addToPath(flowEdge, psit);
+                        };
+                        count++;
+                        //errs()<<"\nCondition satisfied for : ";
+                        //(*psit).start.name->dump();
+                        //errs()<<"\n and";
+                        //flowEdge.tail.name->dump();
                     }
                 }
             }
         }
-        void addToPath(F flowEdge, HOFGpath* p) {
+        void addToPath(F flowEdge, std::set<HOFGpath>::iterator p) {
             for(F edgeInGraph : HeapOFGraph.flows) {
+                int count=0;
+                HOFGpath newPath;
                 if(flowEdge.head == edgeInGraph.tail) {
-                    addToPath(edgeInGraph,p);
-                } else if (flowEdge.head.vertexTy == snk) {
-                    p->pathEdge.insert(edgeInGraph);
-                    break;
+                    if(count > 0) {
+                        errs()<<"\n adding additional edge with head:";
+                        edgeInGraph.tail.name->dump();
+                        errs()<<"\n........";
+                        HOFGpath nextPath;
+                        nextPath = newPath;
+                        nextPath.pathEdge.insert(flowEdge);
+                        pathSet.insert(nextPath);
+                        psit=pathSet.find(nextPath);
+                        addToPath(edgeInGraph,psit);
+                    } else {
+                        newPath=(*p);
+                        (*p).pathEdge.insert(flowEdge);
+                        addToPath(edgeInGraph,p);
+                    } 
+                    count++;
+                    //addToPath(edgeInGraph,p);
+                    //} else if (flowEdge.head.vertexTy == snk) {
+                    //  (*p).pathEdge.insert(edgeInGraph);
+                    //  break;
                 }
             }
+            if (flowEdge.head.vertexTy == snk) {
+                (*p).pathEdge.insert(flowEdge);
+                return;
+            }
+            return;
         }
         void generatePathHeads() {
-            for(V vertex : HeapOFGraph.vertices) {
+            for(F edgeInGraph : HeapOFGraph.flows) {
+                V vertex = edgeInGraph.tail;
                 if(vertex.vertexTy == obj) {
                     HOFGpath p;
                     p.start = vertex;
@@ -790,7 +879,7 @@ namespace {
                                     //fsit->argTransforms.push_back(deallocator);
                                     argTransformIt = fsit->argTransforms.begin();
                                     advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                    errs()<<"\n adding dealloc at index 1: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
+                                    //errs()<<"\n adding dealloc at index 1: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
                                     if(*argTransformIt == deallocator) {
 
                                     } else {
@@ -841,23 +930,23 @@ namespace {
 
                                 if(isa<Argument>(ptrNode.name)){ //|| isa<Argument>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
                                     //errs()<<"\ntail is an arg\n";
-                                    errs()<<"\n ..... \n";
+                                    //errs()<<"\n ..... \n";
                                     for(Argument &A : I.getFunction()->args()) {
-                                        errs()<<"\n ...... \n";
+                                        //errs()<<"\n ...... \n";
                                         Value* arg = dyn_cast<Value>(&A);
                                         if(arg == ptrNode.name || arg == dyn_cast<Instruction>(ptrNode.name)->getOperand(0)) {
-                                            errs()<<"\n ........... \n";
+                                            //errs()<<"\n ........... \n";
                                             Argument *arg = dyn_cast<Argument>(ptrNode.name);
                                             FuncSummary summary;
                                             summary.funcName = I.getFunction();
                                             if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                                 fsit = allFuncSummaries.find(summary);
-                                                errs()<<"\n ......;..........\n";
+                                                //errs()<<"\n ......;..........\n";
 //                                                fsit->argTransforms.push_back(deallocator);
                                                 argTransformIt = fsit->argTransforms.begin();
-                                                errs()<<"\n its stuck here : \n"<< (dyn_cast<Argument>(arg))->getArgNo()<<"\n";
+                                                //errs()<<"\n its stuck here : \n"<< (dyn_cast<Argument>(arg))->getArgNo()<<"\n";
                                                     advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                                    errs()<<"\n adding dealloc at index 2: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
+                                                    //errs()<<"\n adding dealloc at index 2: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
                                     
                                                     fsit->argTransforms.insert(argTransformIt,deallocator);
                                                 //fsit->functionType=allocator;
@@ -953,7 +1042,7 @@ namespace {
                                                 //fsit->functionType=allocator;
                                                 argTransformIt = fsit->argTransforms.begin();
                                                 advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                                errs()<<"\n adding dealloc at index 3: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
+                                                //errs()<<"\n adding dealloc at index 3: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
                                     
                                                 fsit->argTransforms.insert(argTransformIt,deallocator);
                                             }
@@ -1028,7 +1117,7 @@ namespace {
                                                 //fsit->functionType=allocator;
                                                 argTransformIt = fsit->argTransforms.begin();
                                                 advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                                errs()<<"\n adding dealloc at index 4: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
+                                                //errs()<<"\n adding dealloc at index 4: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
                                     
                                                 fsit->argTransforms.insert(argTransformIt,deallocator);
                                             }
