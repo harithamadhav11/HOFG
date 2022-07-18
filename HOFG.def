@@ -14,3 +14,4 @@
 #define RET 11
 #define BIT_CAST 12
 #define ARG_COPY 13
+#define GEP_BIT 14
