@@ -51,7 +51,7 @@ namespace {
             mutable std::set<Value*> conditions;
             DebugLoc location;
             bool operator < (const F &other) const {return ((head < other.head) || (tail < other.tail));}
-            //bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
+            bool operator > (const F &other) const {return ((head > other.head) || (tail > other.tail));}
             bool operator == (const F &other) const {return ((head == other.head) && (tail == other.tail) && (conditions==other.conditions));}
         };
         struct R { //Data structure to store dereference edges
@@ -76,10 +76,17 @@ namespace {
             bool operator == (const HOFGraph &other) const {return ((vertices.size() == other.vertices.size())
             &&(flows.size() == other.flows.size()));}
         }HeapOFGraph;
+        struct argTransform {
+            funcType typeOfTransform;
+            int argumentNumber;
+            bool operator < (const argTransform &other) const {return ((typeOfTransform < other.typeOfTransform) 
+            || (argumentNumber < other.argumentNumber));}
+        };
         struct FuncSummary { //Datastructure for storing function summary
             Function *funcName; //pointer to the function
             mutable funcType functionType; //Indicate the nature of the function - allocator,deallocator,allocdealloc
             mutable std::set<Value*> formalArgs; //List of formal arguments to the function
+            mutable std::set<argTransform> argumentTransform;
             mutable std::list<funcType> argTransforms; //Transformation of arguments : on function execution, if the function allocates or deallocates any location
             mutable std::set<Value*> globalAlloc;//Variables that have scope outside the function that are being allocated
             mutable std::set<Value*> globalDealloc;//Variables that have scope outside the function that are being deallocted
@@ -102,6 +109,7 @@ namespace {
             bool operator < (const HOFGpath &other) const {return ((start < other.start) || (pathEdge != other.pathEdge));}
         };
         mutable std::set<HOFGpath> pathSet;
+        mutable std::list<HOFGpath> pathList;
         std::set<HOFGpath>::iterator psit;
         std::set<FuncSummary> allFuncSummaries; //set of all function summaries
         std::set<FuncSummary>::iterator fsit;
@@ -117,11 +125,13 @@ namespace {
             errs()<<"Entered module pass";
             
             HOFGraph P;
+            int count = 0;
             do { // loop until no change in HOFG
                 errs()<<"\n ///////////////////////////////////////////////////////////// \n";
                 P=HeapOFGraph;
                 generateSummary(M);
-            } while (! (HeapOFGraph == P));
+                count++;
+            } while ((!(HeapOFGraph == P)));
             //P=HeapOFGraph;
             //constructHOFG(M);
             
@@ -132,6 +142,7 @@ namespace {
             printHOFG();
             generatePathsFromHOFG();
             printPaths();
+            //printPathsList();   
             pruneLeakLessPaths();
             detectEndsOFPath();
             getMayLeakPaths();
@@ -146,25 +157,11 @@ namespace {
                     allocationSites++;
                 }
             }
-            //errs()<<"\nNumber of allocation sites : "<<allocationSites<<"\n";
-            //for(F e : HeapOFGraph.flows) {
-            //    int count =0 ;
-            //    std::set<F>::iterator f=HeapOFGraph.flows.begin();
-            //    for(F c : HeapOFGraph.flows) {
-            //        if(e.head == c.head && e.tail == c.tail && e.conditions == c.conditions && e.location == c.location) {
-            //            count++;
-            //            if(count > 1) {
-            //                f=HeapOFGraph.flows.find(c);
-            //                HeapOFGraph.flows.erase(f);
-            //            }
-            //        }
-            //    }
-            //}
+            errs()<<"\nNumber of edges before deleting edges : "<<HeapOFGraph.flows.size()<<" \n";
             std::set<F>::iterator f=HeapOFGraph.flows.begin();
-            //std::set<F>::iterator c=HeapOFGraph.flows.begin();
             int e = HeapOFGraph.flows.size();
             int ce = e;
-            while(e>1) {
+            while(e>1) {//To erase copy of edges
                 int count = 0;
                 ce=HeapOFGraph.flows.size();
                 std::set<F>::iterator c=f;
@@ -172,7 +169,10 @@ namespace {
                     if((*f)==(*c)) {
                         count++;
                         if(count > 1) {
-        //                    errs()<<"\nErased 1";
+                            //errs()<<"\nDeleting because of copy";
+                            //(*c).tail.name->dump();
+                            //errs()<<"-->";
+                            //(*c).head.name->dump();
                             HeapOFGraph.flows.erase(c);
                             ce--;
                             e--;
@@ -185,11 +185,11 @@ namespace {
                 f++;
                 e--;
             }
-
+            
             std::set<F>::iterator fitr=HeapOFGraph.flows.begin();
             int edgesize = HeapOFGraph.flows.size();
             int cesize = edgesize;
-            while(edgesize>1) {
+            while(edgesize>1) {//To erase back edges
                 int count = 0;
                 cesize=HeapOFGraph.flows.size();
                 std::set<F>::iterator citr=fitr;
@@ -197,11 +197,6 @@ namespace {
                     if(((*fitr).head==(*citr).tail) && ((*fitr).tail==(*citr).head)) {
                         count++;
                         if(count > 0) {
-                            //(*citr).tail.name->dump();
-                            //(*citr).head.name->dump();
-                            //(*fitr).tail.name->dump();
-                            //(*fitr).head.name->dump();
-                            //errs()<<"\nErased 2";
                             HeapOFGraph.flows.erase(citr);
                             cesize--;
                             edgesize--;
@@ -214,6 +209,7 @@ namespace {
                 fitr++;
                 edgesize--;
             }
+            
             std::set<F>::iterator A=HeapOFGraph.flows.begin();
             int C = HeapOFGraph.flows.size();
             int D = C;
@@ -229,30 +225,23 @@ namespace {
                     D--;
                 }
                 if(count == 0 && (*A).tail.vertexTy != obj) {
-                    //errs()<<"\n reaches here for: ";
-                    //(*A).tail.name->dump();
                     std::set<F>::iterator eraseEdge = A;
                     A++;
-                    //errs()<<HeapOFGraph.flows.size()<<"\n";
-        //            errs()<<"\nErased 4";
                     HeapOFGraph.flows.erase(eraseEdge);
-                    //errs()<<HeapOFGraph.flows.size()<<"\n";
                     C--;
                 } else {
                     A++;
                 }
                 C--;
             }
+            errs()<<"\nNumber of edges after deleting edges : "<<HeapOFGraph.flows.size()<<" \n";
             std::set<F>::iterator sl=HeapOFGraph.flows.begin();
             std::set<F>::iterator nsl;
             int sll = HeapOFGraph.flows.size();
             while(sll > 0) {
-                //errs()<<"\n checking....";
                 if((*sl).head.name == (*sl).tail.name) {
-                //  errs()<<"\n deleting dummy edge from head to head";
                     nsl=sl;
                     sl++;
-        //            errs()<<"\nErased 5";
                     HeapOFGraph.flows.erase(nsl);
                     sll --;
                 }
@@ -260,19 +249,22 @@ namespace {
             }
             errs()<<"\nPrinting HOFG : "<<HeapOFGraph.flows.size()<< " edges\n";
             for (F e : HeapOFGraph.flows) {
-                //e.tail.name->dump();
-                //StringRef outfile = "out.txt";
-                //std::error_code EC;
-                //raw_fd_ostream out(outfile, EC);
                 outs()<<*(e.tail.name);
                 outs()<<"-->";
                 outs()<<*(e.head.name);
-                //outs()<<"\n debug location:"<<e.location.getLine()<<"\n";
-                //outs()<<"\nWith condition : ";
+                //outs()<<"\nWith conditions :";
                 //for(auto v : e.conditions) {
-                //    outs()<<*(v);
+                //    outs()<<*(v)<<"\n";
                 //}
-                outs()<<"\n";
+                outs()<<"\n............................................................\n";
+                if(isa<PHINode>(e.tail.name) || isa<PHINode>(e.head.name)) {
+
+                } else {
+                    //outs()<<"\nIn line : "<<e.location.getLine()<< "\n";
+                    //auto *Scope = cast<DIScope>(e.location->getScope());
+                    //std::string fileName = Scope->getFilename().str();
+                    //outs()<<"in file : "<<fileName<<"\n";
+                }
             }
             //for (R e : HeapOFGraph.derefs) {
 
@@ -292,18 +284,16 @@ namespace {
         Output : List of paths generated from the graph is printed
        */
         void printPaths() {
-            errs()<<"\nNumber of paths:"<<pathList.size()<<"\n";
+            errs()<<"\nNumber of paths::"<<pathList.size()<<"\n";
         }
         void printPathsList() {
             int psize = pathList.size();
             std::list<HOFGpath>::iterator p=pathList.begin();
-            //for(HOFGpath p : pathSet) {
             while(psize>0){
                 outs()<<"\n Starting from : ";
                 //errs()<<*((*p).start.name);
-
                 outs()<<*((*p).start.name);
-                //outs()<<"\nPath edge size: "<<(*p).pathEdge.size()<<"\n";
+                outs()<<"\nPath edge size: "<<(*p).pathEdge.size()<<"\n";
                 for (F flowEdge : (*p).pathEdge) {
                     outs()<<"-->";
                     outs()<<*(flowEdge.head.name);
@@ -322,7 +312,6 @@ namespace {
             while(psize>0){
                 outs()<<"\n Starting from : ";
                 //errs()<<*((*p).start.name);
-
                 outs()<<*((*p).start.name);
                 outs()<<"\nPath edge size: "<<(*p).pathEdge.size()<<"\n";
                 for (F flowEdge : (*p).pathEdge) {
@@ -354,11 +343,19 @@ namespace {
             }
             errs()<<"\nEnd points : "<<endEdges.size()<<"\n";
             for(F endedge : endEdges) {
+                //errs()<<"\n....................................................\n";
+                endedge.tail.name->dump();
                 endedge.head.name->dump();
-                errs()<<"\nIn line : "<<endedge.location.getLine()<< "\n";
-                auto *Scope = cast<DIScope>(endedge.location->getScope());
-                std::string fileName = Scope->getFilename().str();
-                errs()<<"in file : "<<fileName<<"\n";
+                //if(isa<PHINode>(endedge.head.name)) {
+                //    errs()<<"\n its here\n";
+                //} else if (isa<PHINode>(endedge.tail.name) && isa<PHINode>(endedge.head.name)) {
+                //    errs()<<"\nboth are phi\n";
+                //} else {
+                    errs()<<"\nIn line ::: "<<endedge.location.getLine()<< "\n";
+                    auto *Scope = cast<DIScope>(endedge.location->getScope());
+                    std::string fileName = Scope->getFilename().str();
+                    errs()<<"in file : "<<fileName<<"\n";
+                //}
             }
             errs()<<"\n";
         }
@@ -369,11 +366,8 @@ namespace {
             int count = 0;
             for(F edgeInGraph : HeapOFGraph.flows) {
                 endMark = false;
-                //errs()<<"\nSearching for : ";
-                //edgeInGraph.head.name->dump();
                 for(F otherEdge : HeapOFGraph.flows) {
                     if(edgeInGraph.head == otherEdge.tail) {
-                        //errs()<<"\nCaught";
                         endMark = true;
                     }
                 }
@@ -382,8 +376,6 @@ namespace {
 
                     } else {
                         count++;
-                        //errs()<<"\n End point : ";
-                        //edgeInGraph.head.name->dump();
                         endVertex.insert(edgeInGraph.head);
                         endEdges.insert(edgeInGraph);
                     }
@@ -415,13 +407,16 @@ namespace {
             while(n>1) {
                 //errs()<<"\n"<<n<<"\n";
                 bool status = false;
+                std::set<Value*> combinedConditions;
                 for(F edge : (*p).pathEdge) {
-                    if(edge.head.vertexTy == snk && edge.conditions.size()==0) {
-                        status=true;
-                        break;
+                    for(Value* c : edge.conditions) {
+                        combinedConditions.insert(c);
+                    }
+                    if(edge.head.vertexTy == snk) {
+                        status = true;
                     }
                 }
-                if(status) {
+                if(status && combinedConditions.size() == 0) {
                     //errs()<<"\nDeleting\n";
                     pnext=p++;
                     pathList.erase(p);
@@ -441,7 +436,6 @@ namespace {
             std::list<HOFGpath>::iterator pnext=pathListCopy.begin();
             int n=pathListCopy.size();
             while(n>1) {
-                //errs()<<"\n"<<n<<"\n";
                 bool status = false;
                 for(F edge : (*p).pathEdge) {
                     if(edge.head.vertexTy == snk) {
@@ -454,21 +448,30 @@ namespace {
                     pathListCopy.erase(p);
                     n--;
                     p=pnext;
-                    //errs()<<"\n size : "<<pathSet.size()<<"\n";
                 } else {
                     p++;
+                    n--;
                 }
-                
-                n--;
             }
-            errs()<<"\nNumber of may leak paths : "<<pathListCopy.size();
+            if(n==1) {
+                bool status = false;
+                for(F edge : (*p).pathEdge) {
+                    if(edge.head.vertexTy == snk) {
+                        status=true;
+                        break;
+                    }
+                }
+                if(status) {
+                    pathListCopy.erase(p);
+                }
+            }
+            errs()<<"\nNumber of may leak paths : "<<pathList.size() - pathListCopy.size();
         }
 
         void pruneLeakLessPathsSet() {
             std::set<HOFGpath>::iterator p=pathSet.begin();
             int n=pathSet.size();
             while(n>1) {
-                //errs()<<"\n"<<n<<"\n";
                 bool status = false;
                 for(F edge : (*p).pathEdge) {
                     if(edge.head.vertexTy == snk && edge.conditions.size()==0) {
@@ -477,16 +480,14 @@ namespace {
                     }
                 }
                 if(status) {
-                    //errs()<<"\nDeleting\n";
                     pathSet.erase(p);
                     n--;
-                    //errs()<<"\n size : "<<pathSet.size()<<"\n";
                 }
                 p++;
                 n--;
             }
         }
-        mutable std::list<HOFGpath> pathList;
+        
         void generatePathsFromHOFG() {
             generateStartOfPaths();
             errs()<<"\nThe path list initially have :"<<pathList.size()<<" number of elements";
@@ -500,13 +501,15 @@ namespace {
                             std::list<HOFGpath>::iterator plit;
                             newPath=path;
                             plit=find(pathList.begin(),pathList.end(),path);
-                            //errs()<<"\nCalled from here 1";
+                            errs()<<"\nFrom here 1\n";
+                            edgeInGraph.head.name->dump();
                             addEdgeToList(edgeInGraph,plit);
                         } else {
                             std::list<HOFGpath>::iterator plit;
                             pathList.push_back(newPath);
                             plit=find(pathList.begin(),pathList.end(),newPath);
-                            //errs()<<"\nCalled from here 2";
+                            errs()<<"\nFrom here 2\n";
+                            edgeInGraph.head.name->dump();
                             addEdgeToList(edgeInGraph,plit);
                         }
                         outEdgeCount++;
@@ -516,40 +519,31 @@ namespace {
             }
         }
         void addEdgeToList(F edgeToBeAdded, std::list<HOFGpath>::iterator plit) {
-            //HOFGpath newPath = (*plit);
             bool circPath = false;
             for(F presentEdge : (*plit).pathEdge) {
                 if((edgeToBeAdded.head == presentEdge.tail) || (edgeToBeAdded.head == presentEdge.head)) {
-                //    errs()<<"\n Circular path edge caughr here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!11!";
                     circPath = true;
                 }
             }
             if(!circPath) {
                 (*plit).pathEdge.insert(edgeToBeAdded);
-                //errs()<<"\n added edge :";
-                //edgeToBeAdded.tail.name->dump();
-                //errs()<<"-->";
-                //edgeToBeAdded.head.name->dump();
-                //errs()<<"\nTo start: ";
-                //(*plit).start.name->dump();
-                //errs()<<"\n...............................................";
                 int count = 0;
                 HOFGpath newPath = (*plit);
                 for(F edgeInGraph : HeapOFGraph.flows) {
                     if(edgeToBeAdded.head == edgeInGraph.tail) {
                         if(count == 0) {
-                            //errs()<<"\nCalled from here 3";
+                            errs()<<"\nFrom here 3\n";
+                            edgeInGraph.head.name->dump();
                             addEdgeToList(edgeInGraph,plit);
                         } else {
                             std::list<HOFGpath>::iterator npit;
                             HOFGpath nextPath = newPath;
-                            //errs()<<"\n Path list size : "<<pathList.size()<<"\n";
                             pathList.push_back(newPath);
-                    //        errs()<<"\nPath list size after : "<<pathList.size()<<"\n";
                             npit = pathList.end();
                             npit--;
                             if(newPath == (*npit)) {
-                                //errs()<<"\nCalled from here 4";
+                                errs()<<"\nFrom here 4";
+                                edgeInGraph.head.name->dump();
                                 addEdgeToList(edgeInGraph,npit);
                             }
                         }
@@ -557,6 +551,7 @@ namespace {
                     }
                 }
             }
+            errs()<<"\nPath list size : "<<pathList.size()<<"..\n";
         }   
         void generateStartOfPaths() {
             for(V vert : HeapOFGraph.vertices) {
@@ -566,7 +561,6 @@ namespace {
                     if(find(pathList.begin(),pathList.end(),newPath) != pathList.end()) {
                         
                     } else {
-                        //vert.name->dump();
                         pathList.push_back(newPath);
                     }
                 }
@@ -623,18 +617,18 @@ namespace {
             for(F edgeInGraph : HeapOFGraph.flows) {
                 if(flowEdge.head == edgeInGraph.tail) {
                     if(count == 0) {
-            //            oldPath = (*psit);
+                        //oldPath = (*psit);
                         addToPath(edgeInGraph,psit);
                     } else {
                         oldPath.pathEdge.insert(edgeInGraph);
                         pathSet.insert(oldPath);
-             //           if(pathSet.insert(oldPath).second) {
-//
-             //           } else {
-             //               errs()<<"\n this is not happening";
-             //           }
-             //           psit=pathSet.find(oldPath);
-             //           addToPath(edgeInGraph,psit);
+                        //if(pathSet.insert(oldPath).second) {
+                        //
+                        //} else {
+                        //errs()<<"\n this is not happening";
+                        //}
+                        //psit=pathSet.find(oldPath);
+                        //addToPath(edgeInGraph,psit);
                     }   
                     count++;
                 }
@@ -660,10 +654,6 @@ namespace {
                     unsigned loc = (dyn_cast<Instruction>(p.start.name))->getDebugLoc().getLine();
                     outs()<<"\nline number : "<<loc<<"\n";
                     const DebugLoc &location = (dyn_cast<Instruction>(p.start.name))->getDebugLoc();
-                    //std::string dbgInfo;
-                    //llvm::raw_string_ostream rso(dbgInfo);
-                    //location->print(rso);
-                    //std::string dbgStr = rso.str();
                     auto *Scope = cast<DIScope>(location->getScope());
                     std::string fileName = Scope->getFilename().str();
                     outs()<<"in file : "<<fileName<<"\n";
@@ -677,15 +667,8 @@ namespace {
                     }
                     if(!status) {
                         outs()<<"\nDangling pointer at";
-                        //f1.head.name->dump();
-                        //errs()<<"\n ....................";
                         unsigned loc = f1.location.getLine();
                         outs()<<"\n line number : "<<loc<<"\n";
-                        //const DebugLoc &location = (dyn_cast<Instruction>(f1.head.name))->getDebugLoc();
-                        //std::string dbgInfo;
-                        //llvm::raw_string_ostream rso(dbgInfo);
-                        //location->print(rso);
-                        //std::string dbgStr = rso.str();
                         auto *Scope = cast<DIScope>(f1.location->getScope());
                         std::string fileName = Scope->getFilename().str();
                         outs()<<"in file : "<<fileName<<"\n";
@@ -710,13 +693,7 @@ namespace {
                 }
             }
         }
-        void generateFunctionSummary(Function &F) { //generate HOFG of the function
-                /*
-                Function : constructHOFGfun(Function &F)
-                Input : function
-                Output : HOFG of the function
-                */
-                
+        void generateFunctionSummary(Function &F) { //generate HOFG of the function                
                 if(F.isDeclaration()) {
 
                 } else if(F.getName() == "xmalloc"){
@@ -739,18 +716,13 @@ namespace {
                 //summary.functionType = ;
                 if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                     fsit=allFuncSummaries.find(summary);
-//                    errs()<<fsit->argTransforms.size()<<"size after generation\n";
                     if(fsit->argTransforms.size() < 1) {
                         fsit->functionType=noop;
                     } else {
-                        //if(fsit->argTransforms.contains(alloc)) {
-                        //    errs()<<"\n Contains works";
-                        //}
                         if((find(fsit->argTransforms.begin(), fsit->argTransforms.end(), allocator) != fsit->argTransforms.end()) && 
                         find(fsit->argTransforms.begin(), fsit->argTransforms.end(), deallocator) != fsit->argTransforms.end()) {
                             fsit->functionType=allocdealloc;
                         } else if ((find(fsit->argTransforms.begin(), fsit->argTransforms.end(), deallocator) != fsit->argTransforms.end())){
-                            //errs()<<"dealloc found";
                             fsit->functionType=deallocator;
                         } else if (find(fsit->argTransforms.begin(), fsit->argTransforms.end(), allocator) != fsit->argTransforms.end()) {
                             fsit->functionType=allocator;
@@ -760,14 +732,6 @@ namespace {
                 
                 }
         }
-        //FuncSummary* getFunctionSummary(Function *F) {
-        //    FuncSummary summary;
-        //    summary.funcName=F;
-        //    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
-        //        fsit = allFuncSummaries.find(summary);
-        //        return (&(*fsit));
-        //    }
-        //}
         void constructHOFGfun(Function &F) {
             if(! F.isDeclaration()) {
                 FuncSummary newFunc;
@@ -777,14 +741,12 @@ namespace {
                     newFunc.formalArgs.insert(&A);
                 }
                 //Following for loop is to record preds of bbs and conditions
-                //errs()<<"\nGenerating preds and conditions for bbs of function"<<F.getName();
                 for(Function::iterator FI=F.begin(); FI!=F.end(); FI++) {
                     BasicBlock &B(*FI);
                     predBB newPredSet;
                     newPredSet.bb=&B;
                     auto bt=pred_begin(&B);
                     auto et=pred_end(&B);
-                    //errs()<<"\npreds conditions of BB "<<B.getName()<<" are\n";
                     for (bt = pred_begin(&B), et = pred_end(&B); bt != et; ++bt)
                     {
                         BasicBlock* predecessor = *bt;
@@ -793,11 +755,9 @@ namespace {
                             BranchInst* br = dyn_cast<BranchInst>(terminator);
                             if(br->isConditional()) {
                                 Value *cond= br->getCondition();
-                            //    cond->dump();
                                 for(BasicBlock* s : br->successors()) {
                                     if(s->getName() == B.getName()) {
                                         newPredSet.entriConditions.insert(cond);
-                            //            errs()<<"Condition is for "<<s->getName()<<"\n";
                                     }
                                 }
                             }
@@ -806,7 +766,6 @@ namespace {
                         predBB ifExistPreds;
                         ifExistPreds.bb = predecessor;
                         if(allBBs.find(ifExistPreds) != allBBs.end()) {
-                            //errs()<<"Found an existing entry for bb";
                             ifExistPreds = *(allBBs.find(ifExistPreds));
                             for(BasicBlock *p : ifExistPreds.preds) {
                                 newPredSet.preds.insert(p);
@@ -815,7 +774,6 @@ namespace {
                                 newPredSet.entriConditions.insert(c);
                             }
                         }
-                        //errs()<< "\nBBname: "<< predecessor->getName()<<"\n";
                     }
                     allBBs.insert(newPredSet);
                     /*
@@ -825,16 +783,6 @@ namespace {
                     */
                     idRelevantCodeSegment(B);
                 }
-                //errs()<<"\nPrinting predecessors of BBs";
-                //for (predBB b: allBBs) {
-                //    errs()<<"\nFor BB"<<b.bb->getName()<<" :\n";
-                //    for (BasicBlock* p: b.preds) {
-                //        errs()<<p->getName()<<"\n";
-                //    }
-                //    for (Value *c : b.entriConditions) {
-                //        errs()<<c->getName()<<"\n";
-                //    }
-                //}
             }
         }
 
@@ -946,20 +894,6 @@ namespace {
         }
 
         bool identifyCopyInstruction(Instruction &I) {
-            //store preceeded by load, for pointer types
-            //p=q
-            //if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
-            //    if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
-            //        LoadInst *old = dyn_cast<LoadInst>(storIns->getOperand(0));
-            //        if(isa<LoadInst>(old->getOperand(0)) || isa<LoadInst>(storIns->getOperand(1))) {
-                        //Not a copy it is either a load or store constraint
-            //        } else {
-            //            return true;
-            //        }
-            //    }
-            //}
-            //return false;
-            //To do: check for load instruction.
             if(isa<LoadInst>(&I)) {
                 //errs()<<"\nload..";
                 //I.dump();
@@ -987,14 +921,6 @@ namespace {
             return false;
         }
         bool identifyLoadInstruction(Instruction &I) {
-        //    if(StoreInst *storIns = dyn_cast<StoreInst>(&I)){
-        //        if(isa<LoadInst>(storIns->getOperand(0)) && isa<PointerType>(storIns->getOperand(0)->getType())) {
-        //            if(isa<LoadInst>(storIns->getOperand(1)) && isa<PointerType>(storIns->getOperand(1)->getType())) {
-        //                //errs()<<"Load of two pointer types\n";
-        //                return true;
-        //            }
-        //        }
-        //    }
             return false;
         }
 
@@ -1041,10 +967,6 @@ namespace {
         Output : Annotate the flow edge with the conditions to be satisfied for the program to execute the statement represented by the edge.
         */
         void annotateEdge(F &flowEdge, Instruction &I) {
-            //errs()<<"\nAnnotating edge : ";
-            //flowEdge.tail.name->dump();
-            //errs()<<"-->";
-            //flowEdge.head.name->dump();
             BasicBlock *tail;
             //Conditions to be handled: 
             //global to global
@@ -1056,43 +978,15 @@ namespace {
             //local to arg
             //local to global
             //local to local
-            //if(isa<GlobalVariable>(flowEdge.tail.name)) {
-              //  if(isa<GlobalVariable>(flowEdge.head.name)) { //global to global
-             //       errs()<<"global to global";
-                //} else if (isa<Argument>(flowEdge.head.name)){ 
-             //   } 
-             //   for(Argument &A : I.getFunction()->args()) {
-              //          Value* arg = dyn_cast<Value>(&A);
-             //           if(arg == flowEdge.head.name) {
-                        //} else {
-             //               break;
-             //           }
-             //       tail = dyn_cast<Instruction>(flowEdge.head.name)->getParent();
-            //    }
-            //} else if(isa<GlobalVariable>(flowEdge.head.name)) {
-            //    if(isa<Argument>(flowEdge.tail.name)){
-            //        tail = &(dyn_cast<Argument>(flowEdge.tail.name)->getParent()->getEntryBlock());
-            //    } else {
-            //        tail = dyn_cast<Instruction>(flowEdge.tail.name)->getParent();
-            //    }
-            //} else if(isa<Argument>(flowEdge.tail.name)){
-                //tail = &(dyn_cast<Argument>(flowEdge.tail.name)->getParent()->getEntryBlock());
-            //    tail = dyn_cast<Instruction>(flowEdge.head.name)->getParent();
-            //}
             tail = I.getParent();
-            
             predBB fromBB;
             fromBB.bb = tail;
             if(allBBs.find(fromBB) != allBBs.end()) {
                 fromBB = *(allBBs.find(fromBB));
-                //errs()<<"\nPrinting conditions";
                 for (Value *c : fromBB.entriConditions) {
-                 //   errs()<<"\n ";
-                 //   c->dump();
                     flowEdge.conditions.insert(c);
                 }
             }
-
         }
         /*
         Function : handleRelevantCodeSegment (int Option, BasicBlock &B, Instruction &I)
@@ -1100,8 +994,6 @@ namespace {
         Output : Invoke corresponding function that adds the vertices and edges to HOFG.
         */
         void handleRelevantCodeSegment(int option, BasicBlock &B, Instruction &I) { //case handler of code segments that are relevent to algorithm
-            //errs()<<"\n Reached in handler : "<< B.getName();
-///            errs()<<"\n function name: "<< B.getParent()->getName();
             switch (option) {
                 case MEM_ALLOC: //errs()<<"\nfound malloc";
                                 addMalloc(B,I); //implemented
@@ -1132,12 +1024,9 @@ namespace {
             }
         }
         void addMalloc(BasicBlock &B, Instruction &I) {
-            errs()<<"\n Adding malloc into HOFG\n";
             V objNode,ptrNode;
             objNode.name=dyn_cast<Value>(&I);
-            //objNode.name->dump();
             objNode.vertexTy=obj;
-            //HeapOFGraph.vertices.insert(objNode);
             Type *ty = I.getFunction()->getReturnType();
             if(ty->isPointerTy()) {
                 //errs()<<"\n Pointer type return for this malloc\n";
@@ -1172,12 +1061,17 @@ namespace {
                                         fsit = allFuncSummaries.find(summary);
                                         annotateEdge(flowEdge,I);
                                         flowEdge.location=I.getDebugLoc();
+                                        //errs()<<"Line number 1 "<<I.getDebugLoc().getLine();
                                         if(HeapOFGraph.flows.insert(flowEdge).second) {
                                             //annotateEdge(flowEdge,I);
                                             errs()<<"\n allocated from here";
                                             argTransformIt = fsit->argTransforms.begin();
                                             advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
                                             fsit->argTransforms.insert(argTransformIt,allocator);
+                                            argTransform newTF;
+                                            newTF.typeOfTransform=allocator;
+                                            newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                            fsit->argumentTransform.insert(newTF);
                                         }
                                     }
                                     annotateEdge(flowEdge,I);
@@ -1193,6 +1087,7 @@ namespace {
                             //}
                             annotateEdge(flowEdge,I);
                             flowEdge.location=I.getDebugLoc();
+                            //errs()<<"Line number 2"<<I.getDebugLoc().getLine();
                             HeapOFGraph.flows.insert(flowEdge);
                         //errs()<<"\n Adding flow edge while handling malloc : \n";
                         //I.dump();
@@ -1203,7 +1098,6 @@ namespace {
                     } else if (isa<LoadInst>(Ins)) {
                         //To be handled for two level pointers
                     } else if (isa<StoreInst>(Ins)) {
-                        //errs()<<"\n In store";
                         ptrNode.vertexTy=ptr;
                         ptrNode.name=dyn_cast<Value>(Ins.getOperand(1));
                         HeapOFGraph.vertices.insert(objNode);
@@ -1213,16 +1107,17 @@ namespace {
                         flowEdge.tail=objNode;
                         
                         if(HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
-                            //errs()<<"\n Its already here ...";
-                            //ptrNode.name->dump();
-                            //Ins.getOperand(1)->dump();
                             if (isa<BitCastInst>(Ins.getOperand(1))) {
                                 BitCastInst *bitc = dyn_cast<BitCastInst>(Ins.getOperand(1));
-                                //errs()<<"\n reached here... have to handle it from here...";
+                                
                                 if(isa<Argument>(bitc->getOperand(0))) {
+                                    
                                     for(Argument &A : I.getFunction()->args()) {
                                         Value *arg = dyn_cast<Value>(&A);
                                         if(arg == bitc->getOperand(0)) {
+                                            //errs()<<"\n........";
+                                            //bitc->dump();
+                                            //arg->dump();
                                             V argNode;
                                             std::set<V>::iterator vertit;
                                             argNode.name=arg;
@@ -1239,7 +1134,6 @@ namespace {
                                             annotateEdge(argFlowEdge,I);//Annotate should be double checked
                                             argFlowEdge.location = bitc->getDebugLoc();
                                             if(HeapOFGraph.flows.find(argFlowEdge) != HeapOFGraph.flows.end()) {
-                                                errs()<<"\nEdge already there";
                                             } else {
                                                 FuncSummary summary;
                                                 summary.funcName = I.getFunction();
@@ -1247,17 +1141,30 @@ namespace {
                                                 if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                                     fsitloc = allFuncSummaries.find(summary);
                                                     argTransformIt = fsitloc->argTransforms.begin();
-                                                //errs()<<"\n its stuck here : \n"<< (dyn_cast<Argument>(arg))->getArgNo()<<"\n";
                                                     advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                                    //errs()<<"\n adding dealloc at index 2: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
+                                                    if(fsitloc->argTransforms.size() > 0 && *(argTransformIt) == allocator) {
+                                                        //  errs()<<"\n detected allocator in arg transforms of length:"<<fsitloc->argTransforms.size();
+                                                    } else {
                                                     fsitloc->functionType=allocator;
+                                                    //errs()<<";;;;;;;;;;;;;;;;;;;;;;";
+                                                    //I.dump();
+                                                    //errs()<<"\nallocated from here for arg number"<<(dyn_cast<Argument>(arg))->getArgNo();
+                                                    //errs()<<"\n For function : "<<fsitloc->funcName->getName()<<"\n";
                                                     fsitloc->argTransforms.insert(argTransformIt,allocator);
-                                                    errs()<<"\n lets see what happens here : "<<fsitloc->argTransforms.size();    
+                                                    
+                                                    }
+                                                    //if(fsitloc->argumentTransform.insert(newTF).second) {
+                                                    //    errs()<<"\n it is successfully inserted, but why?????????????????????????????";
+                                                    //}
+                                                    argTransform newTF;
+                                                    newTF.typeOfTransform=allocator;
+                                                    newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                                    fsitloc->argumentTransform.insert(newTF);
                                                 }
+                                                
+                                                //errs()<<"Line number 3 "<<bitc->getDebugLoc().getLine();
                                                 if(HeapOFGraph.flows.insert(argFlowEdge).second) {
-                                                    errs()<<"\n Added edge";
-                                                    argFlowEdge.tail.name->dump();
-                                                    argFlowEdge.head.name->dump();
+                                                    
                                                 }
                                             }
                                         }
@@ -1274,16 +1181,20 @@ namespace {
                                         fsit = allFuncSummaries.find(summary);
                                         annotateEdge(flowEdge,I);
                                         flowEdge.location=I.getDebugLoc();
+                                        //errs()<<"Line number 4 "<<I.getDebugLoc().getLine();
                                         if(HeapOFGraph.flows.insert(flowEdge).second) {
-                                            //annotateEdge(flowEdge,I);
-                                            errs()<<"\n Allocated from here 2";
                                             argTransformIt = fsit->argTransforms.begin();
                                             advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
                                             fsit->argTransforms.insert(argTransformIt,allocator);
                                         }
+                                        argTransform newTF;
+                                        newTF.typeOfTransform=allocator;
+                                        newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                        fsit->argumentTransform.insert(newTF);
                                     }
                                     annotateEdge(flowEdge,I);
                                     flowEdge.location=I.getDebugLoc();
+                                    //errs()<<"Line number 5 "<<I.getDebugLoc().getLine();
                                     HeapOFGraph.flows.insert(flowEdge);
                                     break;
                                 }
@@ -1300,19 +1211,13 @@ namespace {
             }
         }
         void addDealloc(BasicBlock &B, Instruction &I) {
-            //errs()<<"\nDEalloc statement found";
             V freeNode,ptrNode;
             freeNode.name=dyn_cast<Value>(&I);
             freeNode.vertexTy=snk;
             if (HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
-                //errs()<<"\nfree node found";
                 vit=HeapOFGraph.vertices.find(freeNode);
                 freeNode = *vit;
-                //freeNode.name->dump();
             } else {
-                //if(! (HeapOFGraph.vertices.insert(freeNode).second)) {
-                    //errs()<<"\nHere is the real culprit";
-                //}
             }
             if (isa<Argument>(I.getOperand(0))) {
                 for(Argument &A : I.getFunction()->args()) {
@@ -1327,20 +1232,23 @@ namespace {
                             HeapOFGraph.vertices.insert(freeNode);
                             annotateEdge(flowEdge,I);
                             flowEdge.location=I.getDebugLoc();
+                            //errs()<<"Line number 6 "<<I.getDebugLoc().getLine();
                             if(HeapOFGraph.flows.insert(flowEdge).second) {
                                 FuncSummary summary;
                                 summary.funcName = I.getFunction();
                                 if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                     fsit = allFuncSummaries.find(summary);
-                                    //fsit->argTransforms.push_back(deallocator);
                                     argTransformIt = fsit->argTransforms.begin();
                                     advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                    //errs()<<"\n adding dealloc at index 1: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
                                     if(*argTransformIt == deallocator) {
 
                                     } else {
                                         fsit->argTransforms.insert(argTransformIt,deallocator);
-                                    }                                
+                                    }
+                                    argTransform newTF;
+                                    newTF.typeOfTransform=deallocator;
+                                    newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                    fsit->argumentTransform.insert(newTF);                            
                                 }
                             }
                         }
@@ -1355,11 +1263,8 @@ namespace {
                         LoadInst *load = dyn_cast<LoadInst>(Ins.getOperand(0));
                         if(isa<PointerType>(load->getType())) {
                             if(GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(load->getOperand(0))) {
-                                if(isa<Argument>(gep->getOperand(0))){ //|| isa<Argument>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
-                                    //errs()<<"\ntail is an arg\n";
-                                    //errs()<<"\n ..... \n";
-                                    for(Argument &A : I.getFunction()->args()) {
-                                        //errs()<<"\n ...... \n";
+                                if(isa<Argument>(gep->getOperand(0))){
+                                for(Argument &A : I.getFunction()->args()) {
                                         Value* arg = dyn_cast<Value>(&A);
                                         if(arg == gep->getOperand(0)) {
                                             std::set<V>::iterator vertit;
@@ -1387,38 +1292,26 @@ namespace {
                                             annotateEdge(flowEdge,I);
                                             flowEdge.location=I.getDebugLoc();
                                             if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                                            //    errs()<<"\nRepeat can be detected here";
                                             } else {
+                                                //errs()<<"Line number 7 "<<I.getDebugLoc().getLine();
                                                 if(HeapOFGraph.flows.insert(flowEdge).second){
-                                                    //errs()<<"\nEdge added";
                                                     FuncSummary summary;
                                                     summary.funcName = I.getFunction();
                                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                                         std::set<FuncSummary>::iterator fsitl;
                                                         std::list<funcType>::iterator argTransformItl;
                                                         fsitl = allFuncSummaries.find(summary);
-                                                        //errs()<<"\n in here"<<fsitl->funcName->getName();
-                                                        //errs()<<fsitl->argTransforms.size()<<"\n";
                                                         argTransformItl = fsitl->argTransforms.begin();
-                                                        //advance(argTransformItl,(dyn_cast<Argument>(arg))->getArgNo());
                                                         if(find(fsitl->argTransforms.begin(),fsitl->argTransforms.end(),deallocator) != fsitl->argTransforms.end()) {
                                                             fsitl->functionType=deallocator;
-                                                         //   errs()<<"and here!!!!!!!!!!";
-                                                        //    errs()<<"\nthe function "<<I.getFunction()->getName()<<" is a n allocator";
-                                                        //    errs()<<fsitl->argTransforms.size()<<"\n";
                                                         } else {
-                                                         //   errs()<<"safely here............";
                                                             fsitl->argTransforms.insert(argTransformItl,deallocator);
-                                                        //    fsit->functionType=allocator;
-                                                        //    errs()<<"\nthe function "<<I.getFunction()->getName()<<" is an allocator1";
                                                         }
-                                                        //*argTransformItl=allocator;
-                                                        //fsit->argTransforms.push_back(allocator);
+                                                        argTransform newTF;
+                                                        newTF.typeOfTransform=deallocator;
+                                                        newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                                        fsitl->argumentTransform.insert(newTF);
                                                         fsitl->functionType=deallocator;
-                                                        //errs()<<"............................................."<<fsitl->argTransforms.size()<<"\n";
-                                                        if(fsitl->functionType == deallocator){
-                                                            //errs()<<"\n deallocator marked";
-                                                        }
                                                     }
                                                 }
                                             }
@@ -1428,94 +1321,73 @@ namespace {
                                 }
                             }
                         }
-                    //} else if(isa<BitCastInst>(Ins) && isa<GetElementPtrInst>(Ins.getOperand(0))) {
-                    //    GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(Ins.getOperand(0));
-                    //    //if(load->getType()) {
-                    //        if(LoadInst *load = dyn_cast<LoadInst>(gep->getOperand(0))) {
-                    //            if(isa<Argument>(load->getOperand(0))){ //|| isa<Argument>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
-                    //                //errs()<<"\ntail is an arg\n";
-                    //                //errs()<<"\n ..... \n";
-                    //                for(Argument &A : I.getFunction()->args()) {
-                    //                    //errs()<<"\n ...... \n";
-                    //                    Value* arg = dyn_cast<Value>(&A);
-                    //                    if(arg == load->getOperand(0)) {
-                    //                        std::set<V>::iterator vertit;
-                    //                        freeNode.name=dyn_cast<Value>(&I);
-                    //                        freeNode.vertexTy=snk;
-                    //                        if(HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
-                    //                            vertit=HeapOFGraph.vertices.find(freeNode);
-                    //                        } else {
-                    //                            if(HeapOFGraph.vertices.insert(freeNode).second) {
-                    //                                vertit=HeapOFGraph.vertices.find(freeNode);
-                    //                            }
-                    //                        }
-                    //                        ptrNode.name = load->getOperand(0);
-                    //                        ptrNode.vertexTy = ptr;
-                    //                        if(HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
-                    //                           
-                    //                        } else {
-                    //                            if(HeapOFGraph.vertices.insert(freeNode).second) {
-                    //                                
-                    //                            }
-                    //                        }
-                    //                        F flowEdge;
-                    //                        flowEdge.tail=ptrNode;
-                    //                        flowEdge.head=freeNode;
-                    //                        annotateEdge(flowEdge,I);
-                    //                        flowEdge.location=I.getDebugLoc();
-                    //                        if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                    //                        //    errs()<<"\nRepeat can be detected here";
-                    //                        } else {
-                    //                            if(HeapOFGraph.flows.insert(flowEdge).second){
-                    //                                //errs()<<"\nEdge added";
-                    //                                FuncSummary summary;
-                    //                                summary.funcName = I.getFunction();
-                    //                                if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
-                    //                                    std::set<FuncSummary>::iterator fsitl;
-                    //                                    std::list<funcType>::iterator argTransformItl;
-                    //                                    fsitl = allFuncSummaries.find(summary);
-                    //                                    //errs()<<"\n in here"<<fsitl->funcName->getName();
-                    //                                    //errs()<<fsitl->argTransforms.size()<<"\n";
-                    //                                    argTransformItl = fsitl->argTransforms.begin();
-                    //                                    //advance(argTransformItl,(dyn_cast<Argument>(arg))->getArgNo());
-                    //                                    if(find(fsitl->argTransforms.begin(),fsitl->argTransforms.end(),deallocator) != fsitl->argTransforms.end()) {
-                    //                                        fsitl->functionType=deallocator;
-                    //                                     //   errs()<<"and here!!!!!!!!!!";
-                    //                                    //    errs()<<"\nthe function "<<I.getFunction()->getName()<<" is a n allocator";
-                    //                                    //    errs()<<fsitl->argTransforms.size()<<"\n";
-                    //                                    } else {
-                    //                                     //   errs()<<"safely here............";
-                    //                                        fsitl->argTransforms.insert(argTransformItl,deallocator);
-                    //                                    //    fsit->functionType=allocator;
-                    //                                    //    errs()<<"\nthe function "<<I.getFunction()->getName()<<" is an allocator1";
-                    //                                    }
-                    //                                    //*argTransformItl=allocator;
-                    //                                    //fsit->argTransforms.push_back(allocator);
-                    //                                    fsitl->functionType=deallocator;
-                    //                                    //errs()<<"............................................."<<fsitl->argTransforms.size()<<"\n";
-                    //                                    if(fsitl->functionType == deallocator){
-                    //                                        //errs()<<"\n deallocator marked";
-                    //                                    }
-                    //                                }
-                    //                            }
-                    //                        }
-//
-                    //                    }
-                    //                }
-                    //            }
-                    //        }
-                    //    //}
+                    } else if(isa<BitCastInst>(Ins) && isa<GetElementPtrInst>(Ins.getOperand(0))) {
+                        GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(Ins.getOperand(0));
+                        //if(load->getType()) {
+                            if(LoadInst *load = dyn_cast<LoadInst>(gep->getOperand(0))) {
+                                if(isa<Argument>(load->getOperand(0))){ //|| isa<Argument>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
+                                    for(Argument &A : I.getFunction()->args()) {
+                                        Value* arg = dyn_cast<Value>(&A);
+                                        if(arg == load->getOperand(0)) {
+                                            std::set<V>::iterator vertit;
+                                            freeNode.name=dyn_cast<Value>(&I);
+                                            freeNode.vertexTy=snk;
+                                            if(HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
+                                                vertit=HeapOFGraph.vertices.find(freeNode);
+                                            } else {
+                                                if(HeapOFGraph.vertices.insert(freeNode).second) {
+                                                    vertit=HeapOFGraph.vertices.find(freeNode);
+                                                }
+                                            }
+                                            ptrNode.name = load->getOperand(0);
+                                            ptrNode.vertexTy = ptr;
+                                            if(HeapOFGraph.vertices.find(freeNode) != HeapOFGraph.vertices.end()) {
+                                               
+                                            } else {
+                                                if(HeapOFGraph.vertices.insert(freeNode).second) {
+                                                    
+                                                }
+                                            }
+                                            F flowEdge;
+                                            flowEdge.tail=ptrNode;
+                                            flowEdge.head=freeNode;
+                                            annotateEdge(flowEdge,I);
+                                            flowEdge.location=I.getDebugLoc();
+                                            if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
+                                            } else {
+                                                //errs()<<"Line number 8 "<<I.getDebugLoc().getLine();
+                                                if(HeapOFGraph.flows.insert(flowEdge).second){
+                                                    FuncSummary summary;
+                                                    summary.funcName = I.getFunction();
+                                                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                                                        std::set<FuncSummary>::iterator fsitl;
+                                                        std::list<funcType>::iterator argTransformItl;
+                                                        fsitl = allFuncSummaries.find(summary);
+                                                        argTransformItl = fsitl->argTransforms.begin();
+                                                        if(find(fsitl->argTransforms.begin(),fsitl->argTransforms.end(),deallocator) != fsitl->argTransforms.end()) {
+                                                            fsitl->functionType=deallocator;
+                                                        } else {
+                                                            fsitl->argTransforms.insert(argTransformItl,deallocator);
+                                                        }
+                                                        argTransform newTF;
+                                                        newTF.typeOfTransform=deallocator;
+                                                        newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                                        fsitl->argumentTransform.insert(newTF);
+                                                        fsitl->functionType=deallocator;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        //}
                     } else if(isa<BitCastInst>(Ins)) {//for 2 level pointers, there can be load instead of bitcast as operand of free
-                        //errs()<<"\n It reached in a bitcast detection \n";
                         ptrNode.name=dyn_cast<Value>(&Ins);
-                        //ptrNode.name->dump();
                         ptrNode.vertexTy=ptr;
                         if (HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
-                            //errs()<<"It is already there in here";
                             vit=HeapOFGraph.vertices.find(ptrNode);
                             ptrNode = *vit;
-                            //errs()<<"\n and it is : \n";
-                            //ptrNode.name->dump();
                         } else {
                             if(! HeapOFGraph.vertices.insert(ptrNode).second) {
                                 //errs()<<"\n now it is totaly wrong";
@@ -1526,46 +1398,32 @@ namespace {
                         F flowEdge;
                         flowEdge.tail=ptrNode;
                         flowEdge.head=freeNode;
-                        //if (! (HeapOFGraph.flows.insert(flowEdge).second)) { .insert.second will return if the insertion is successful
-                            //errs()<<"Here it didnt work";
-                        //}
                         annotateEdge(flowEdge,I);
                         if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                        //    errs()<<"\nRepeat can be detected here";
                         } else {
-                            //for(Argument &A : I.getFunction()->args()) {
-                            //    Value* arg = dyn_cast<Value>(&A);
-                                //arg->dump();
-                                //ptrNode.name->dump();
-                            //errs()<<"\n adding new edge";
                             HeapOFGraph.vertices.insert(freeNode);
                             annotateEdge(flowEdge,I);
                             flowEdge.location=I.getDebugLoc();
+                            //errs()<<"Line number 9 "<<I.getDebugLoc().getLine();
                             if(HeapOFGraph.flows.insert(flowEdge).second){
-
-                                if(isa<Argument>(ptrNode.name)){ //|| isa<Argument>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
-                                    //errs()<<"\ntail is an arg\n";
-                                    //errs()<<"\n ..... \n";
+                                if(isa<Argument>(ptrNode.name)){ 
                                     for(Argument &A : I.getFunction()->args()) {
-                                        //errs()<<"\n ...... \n";
                                         Value* arg = dyn_cast<Value>(&A);
                                         if(arg == ptrNode.name || arg == dyn_cast<Instruction>(ptrNode.name)->getOperand(0)) {
-                                            //errs()<<"\n ........... \n";
                                             Argument *arg = dyn_cast<Argument>(ptrNode.name);
                                             FuncSummary summary;
                                             summary.funcName = I.getFunction();
                                             if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                                 fsit = allFuncSummaries.find(summary);
-                                                //errs()<<"\n ......;..........\n";
-                                                //fsit->argTransforms.push_back(deallocator);
                                                 argTransformIt = fsit->argTransforms.begin();
-                                                //errs()<<"\n its stuck here : \n"<< (dyn_cast<Argument>(arg))->getArgNo()<<"\n";
-                                                    advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                                    //errs()<<"\n adding dealloc at index 2: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
-                                    
-                                                    fsit->argTransforms.insert(argTransformIt,deallocator);
-                                                //fsit->functionType=allocator;
+                                                advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
+                                                 fsit->argTransforms.insert(argTransformIt,deallocator);
+                                                 argTransform newTF;
+                                                newTF.typeOfTransform=deallocator;
+                                                newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                                fsit->argumentTransform.insert(newTF);
                                             }
+                                            
                                             break;
                                         }
                                     }
@@ -1576,7 +1434,6 @@ namespace {
                                     if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                         fsit = allFuncSummaries.find(summary);
                                         fsit->globalDealloc.insert(freeNode.name);
-                                        //errs()<<"Global value deallocated";
                                     }
                                 } else if(isa<GlobalVariable>(dyn_cast<Instruction>(ptrNode.name)->getOperand(0))) {
                                     FuncSummary summary;
@@ -1585,20 +1442,11 @@ namespace {
                                         fsit = allFuncSummaries.find(summary);
                                         Value *v=dyn_cast<Value>(dyn_cast<Instruction>(freeNode.name)->getOperand(0));
                                         fsit->globalDealloc.insert(v);
-                                        //errs()<<"Global value deallocated";
                                     }
                                 }
                             }
-                            //}
-                            
                         }
-                        //errs()<<"\n Adding flow edge while handling dealloc : \n";
-                        //Ins.dump();
-                        //errs()<<"\n to \n";
-                        //I.dump();
-                        //errs()<<"...................";
                     } else if (isa<LoadInst>(Ins) && isa<PointerType>(Ins.getType())) {
-                        //errs()<<"\n here it comes";
                         ptrNode.name=dyn_cast<Value>(&Ins);
                         if (HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
                             ptrNode=*(HeapOFGraph.vertices.find(ptrNode));
@@ -1608,12 +1456,9 @@ namespace {
                             HeapOFGraph.vertices.insert(freeNode);
                             annotateEdge(flowEdge,I); 
                             flowEdge.location=I.getDebugLoc();
+                            //errs()<<"Line number 10 "<<I.getDebugLoc().getLine();
                             HeapOFGraph.flows.insert(flowEdge);
                         }
-                        //errs()<<"Its here : ";
-                        //Ins.dump();
-                        //Ins.getOperand(0)->dump();
-                        //To be handled for two level pointers
                     } else {
                         ptrNode.name=dyn_cast<Value>(&Ins);
                         if (HeapOFGraph.vertices.find(ptrNode) != HeapOFGraph.vertices.end()) {
@@ -1624,6 +1469,7 @@ namespace {
                             HeapOFGraph.vertices.insert(freeNode);
                             annotateEdge(flowEdge,I); 
                             flowEdge.location=I.getDebugLoc();
+                            //errs()<<"Line number 11 "<<I.getDebugLoc().getLine();
                             HeapOFGraph.flows.insert(flowEdge);
                         }
                     }
@@ -1633,19 +1479,15 @@ namespace {
         void addCopy(BasicBlock &B, Instruction &I) {
             V srcNode, destNode;
             srcNode.name=dyn_cast<Value>(I.getOperand(0));
-            //I.getOperand(0)->dump();
             srcNode.vertexTy=ptr;
-            if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                //errs()<<"\n Inside copy : of ";
-                //I.dump();
+            if(isa<Argument>(srcNode.name)) {
+
+            } else if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(&I);
                 destNode.vertexTy=ptr;
                 if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
-                    //This is a copy to existing node.
-                //    vit=HeapOFGraph.vertices.find(destNode);
-                //    destNode = *vit;
                 } else {
                     HeapOFGraph.vertices.insert(destNode);
                 }
@@ -1654,32 +1496,27 @@ namespace {
                 flowEdge.tail=srcNode;
                 annotateEdge(flowEdge,I);
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                        //    errs()<<"\nRepeat can be detected here";
                         } else {
-                            //for(Argument &A : I.getFunction()->args()) {
-                            //    Value* arg = dyn_cast<Value>(&A);
                                 if(isa<Argument>(destNode.name)) {
                                     for(Argument &A : I.getFunction()->args()) {
                                         Value* arg = dyn_cast<Value>(&A);
                                         if(arg == destNode.name) {
-                                        //errs()<<"\nhead is an arg in copy\n";
                                             FuncSummary summary;
                                             summary.funcName = I.getFunction();
                                             if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                                 fsit = allFuncSummaries.find(summary);
-                                                //fsit->argTransforms.push_back(allocator);
-                                                //fsit->functionType=allocator;
                                                 argTransformIt = fsit->argTransforms.begin();
                                                 advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                                                //errs()<<"\n adding dealloc at index 3: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
-                                    
                                                 fsit->argTransforms.insert(argTransformIt,deallocator);
+                                                argTransform newTF;
+                                                newTF.typeOfTransform=deallocator;
+                                                newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                                fsit->argumentTransform.insert(newTF);
                                             }
                                             break;
                                         }
                                     }
                                 }
-                            //}
                             if(isa<GlobalVariable>(flowEdge.head.name) && isa<GlobalVariable>(flowEdge.tail.name)) {
                                 predBB fromBB;
                                 fromBB.bb =&B;
@@ -1692,39 +1529,56 @@ namespace {
                             } else {
                                 annotateEdge(flowEdge,I);
                             }
-                            flowEdge.location=I.getDebugLoc();
-                            HeapOFGraph.flows.insert(flowEdge);
+                            //srcNode.name->dump();
+                            //destNode.name->dump();
+                            if(Instruction *destIns = dyn_cast<Instruction>(destNode.name)) {
+                                if(destIns->getDebugLoc()) {
+                                    flowEdge.location=destIns->getDebugLoc();
+                                    HeapOFGraph.flows.insert(flowEdge);
+                                }
+                            } else if(Instruction *srcIns = dyn_cast<Instruction>(srcNode.name)) {
+                                if(srcIns->getDebugLoc()) {
+                                    //errs()<<"\nFor edge from ";
+                                    //srcNode.name->dump();
+                                    //errs()<<"\n to :";
+                                    //destNode.name->dump();
+                                    //errs()<<"\nIt is unknown\n";
+                                    //for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
+                                    //    Instruction &Ins(*BI);
+                                    //    if(Ins.getOperand(0) == dyn_cast<Value>(&I) ) {
+                                    //        errs()<<"\n Operand is the non debug instruction............................................";
+                                    //        Ins.dump();
+                                    //    }
+                                    //}
+                                    flowEdge.location=srcIns->getDebugLoc();
+                                    HeapOFGraph.flows.insert(flowEdge);
+                                }
+                            } else {
+                                I.dump();
+                                //flowEdge.location=(dyn_cast<Instruction>(srcNode.name))->getDebugLoc();
+                                //errs()<<"Line number 11 "<<(dyn_cast<Instruction>(srcNode.name))->getDebugLoc().getLine();
+                                //HeapOFGraph.flows.insert(flowEdge);
+                                errs()<<"\nEdge not added here";
+                            }
                         }
             } else {
-                //errs()<<"\n Found as not an exising vertex!!!";
-                //I.dump();
             }
         }
         void addGepToBitcast(BasicBlock &B, Instruction &I) {
-            //errs()<<"\nIn this function";
-            //errs()<<I.getFunction()->getName();
             V srcNode, destNode;
             std::set<V>::iterator dit;
             srcNode.name=dyn_cast<Value>(&I);
-            //I.getOperand(0)->dump();
             srcNode.vertexTy=ptr;
             if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
                 GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(I.getOperand(0));
-                //errs()<<"\nGoing to add : ";
-                //I.dump();
                 vit=HeapOFGraph.vertices.find(srcNode);
                 srcNode = *vit;
                 destNode.name=dyn_cast<Value>(gep->getOperand(0));
-                //gep->getOperand(0)->dump();
                 destNode.vertexTy=ptr;
                 if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
-                    //errs()<<"\n existing dest";
                     dit = HeapOFGraph.vertices.find(destNode);
                     destNode = *dit;
-                    //errs()<<"\n inserting ";
-                    //destNode.name->dump();
                 } else {
-                    //errs()<<"\nnew dest";
                     HeapOFGraph.vertices.insert(destNode);
                     dit = HeapOFGraph.vertices.find(destNode);
                     destNode = *dit;
@@ -1734,42 +1588,28 @@ namespace {
                 flowEdge.tail=srcNode;
                 annotateEdge(flowEdge,I);
                 if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                //    errs()<<"\nRepeat can be detected here";
                 } else {
                     if(isa<Argument>(destNode.name)) {
                         for(Argument &A : I.getFunction()->args()) {
-                            //errs()<<"\n in arg loop";
                             Value* arg = dyn_cast<Value>(&A);
                             if(arg == destNode.name) {
-                               // errs()<<"\n arg is dest node name";
                                 FuncSummary summary;
                                 summary.funcName = I.getFunction();
                                 if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                                     std::set<FuncSummary>::iterator fsitl;
                                     std::list<funcType>::iterator argTransformItl;
                                     fsitl = allFuncSummaries.find(summary);
-                                 //   errs()<<"\n in here"<<fsitl->funcName->getName();
-                                   // errs()<<fsitl->argTransforms.size()<<"\n";
                                     argTransformItl = fsitl->argTransforms.begin();
-                                    //advance(argTransformItl,(dyn_cast<Argument>(arg))->getArgNo());
                                     if(find(fsitl->argTransforms.begin(),fsitl->argTransforms.end(),allocator) != fsitl->argTransforms.end()) {
                                         fsitl->functionType=allocator;
-                                     //   errs()<<"and here!!!!!!!!!!";
-                                    //    errs()<<"\nthe function "<<I.getFunction()->getName()<<" is a n allocator";
-                                    //    errs()<<fsitl->argTransforms.size()<<"\n";
                                     } else {
-                                     //   errs()<<"safely here............";
                                         fsitl->argTransforms.insert(argTransformItl,allocator);
-                                    //    fsit->functionType=allocator;
-                                    //    errs()<<"\nthe function "<<I.getFunction()->getName()<<" is an allocator1";
                                     }
-                                    //*argTransformItl=allocator;
-                                    //fsit->argTransforms.push_back(allocator);
+                                    argTransform newTF;
+                                    newTF.typeOfTransform=deallocator;
+                                    newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                    fsitl->argumentTransform.insert(newTF);
                                     fsitl->functionType=allocator;
-                                    //errs()<<"............................................."<<fsitl->argTransforms.size()<<"\n";
-                                    if(fsitl->functionType == allocator){
-                                    //    errs()<<"\n allocator marked";
-                                    }
                                 }
                                 break;
                             }
@@ -1788,31 +1628,25 @@ namespace {
                         annotateEdge(flowEdge,I);
                     }
                     flowEdge.location=I.getDebugLoc();
+                    //errs()<<"Line number 12 "<<I.getDebugLoc().getLine();
                     HeapOFGraph.flows.insert(flowEdge);
                 }
             }
         }
         void addPhiInstruction(BasicBlock &B, Instruction &I) {
             PHINode *Phi = dyn_cast<PHINode>(&I);
-            //Phi->dump();
-            //errs()<<"\n Processing phi instruction \n";
-            //errs()<<Phi->getNumIncomingValues()<<"...\n";
             int l=Phi->getNumIncomingValues();
             V destNode;
             destNode.name=dyn_cast<Value>(&I);
             destNode.vertexTy=ptr;
             for (int i=0; i<l; i++) {
-                //Phi->getIncomingValue(i)->dump();
-                //errs()<<"\n ......\n";
                 V srcNode;
-                //BasicBlock *src = Phi->getIncomingBlock(i);
                 srcNode.name=dyn_cast<Value>(Phi->getIncomingValue(i));
                 srcNode.vertexTy=ptr;
                 if(HeapOFGraph.vertices.find(srcNode) != HeapOFGraph.vertices.end()) {
-                    //errs()<<"\n Found an existing node !!! \n";
                     srcNode=*(HeapOFGraph.vertices.find(srcNode));
                     if(HeapOFGraph.vertices.find(destNode) != HeapOFGraph.vertices.end()) {
-                    //This is a copy to existing node.
+                        //This is a copy to existing node.
                         vit=HeapOFGraph.vertices.find(destNode);
                         destNode = *vit;
                     } else {
@@ -1825,14 +1659,10 @@ namespace {
                     circularEdge.head=srcNode;
                     circularEdge.tail=destNode;
                     annotateEdge(circularEdge,I);
-                    //flowEdge.condition=src;
                     annotateEdge(flowEdge,I);
                     if(HeapOFGraph.flows.find(flowEdge) != HeapOFGraph.flows.end()) {
-                        //    errs()<<"\nRepeat can be detected here";
                     } else if (HeapOFGraph.flows.find(circularEdge) != HeapOFGraph.flows.end()) {
                     } else {
-                        //for(Argument &A : I.getFunction()->args()) {
-                        //    Value* arg = dyn_cast<Value>(&A);
                         if(isa<Argument>(destNode.name)) {
                             for(Argument &A : I.getFunction()->args()) {
                                 Value* arg = dyn_cast<Value>(&A);
@@ -1849,26 +1679,46 @@ namespace {
                                         //errs()<<"\n adding dealloc at index 4: "<<(dyn_cast<Argument>(arg))->getArgNo()<<" for function : "<< I.getFunction()->getName();
                             
                                         fsit->argTransforms.insert(argTransformIt,deallocator);
+                                        argTransform newTF;
+                                        newTF.typeOfTransform=deallocator;
+                                        newTF.argumentNumber=(dyn_cast<Argument>(arg))->getArgNo();
+                                        fsit->argumentTransform.insert(newTF);
                                     }
                                     break;
                                 }
                             }
                         }
-                            //if(isa<Argument>(srcNode.name)) {
-                            //    for(Argument &A : I.getFunction()->args()) {
-                            //        Value* arg = dyn_cast<Value>(&A);
-                            //        if(arg == srcNode.name) {
-                                //srcNode.name->dump();
-                                //destNode.name->dump();
-                                       // errs()<<"\nSource of phi instruction is an argument";
-                                        //break;
-                            //        }
-                            //    }
-                            //}
-                        //}
                         annotateEdge(flowEdge,I);
-                        flowEdge.location=I.getDebugLoc();
-                        HeapOFGraph.flows.insert(flowEdge);
+                        
+                        //errs()<<"\n";
+                        //I.dump();
+                        //for(BasicBlock::iterator BI=B.begin(); BI!=B.end(); BI++) {
+                        //    Instruction &Ins(*BI);
+                        //    if(Ins.getOperand(0) == dyn_cast<Value>(&I) ){//|| dyn_cast<Instruction>(Ins.getOperand(1)) == dyn_cast<Instruction>(I)) {
+                        //        errs()<<"\n REached here ";
+                        //        flowEdge.location=Ins.getDebugLoc();
+                        //    }
+                        //}
+                        //srcNode.name->dump();
+                        if(Instruction *srcIns = dyn_cast<Instruction>(srcNode.name)) {
+                            if(srcIns->getDebugLoc()) {
+                                flowEdge.location=srcIns->getDebugLoc();
+                                HeapOFGraph.flows.insert(flowEdge);        
+                            }
+                        } else if(Instruction *destIns = dyn_cast<Instruction>(destNode.name)) {
+                            if(destIns->getDebugLoc()) {
+                                flowEdge.location=destIns->getDebugLoc();
+                                HeapOFGraph.flows.insert(flowEdge);
+                            }
+                        }
+                        //if(!(dyn_cast<Instruction>(srcNode.name))->getDebugLoc()) {
+                        //    errs()<<"\nIt is unknown";
+                         else {
+                             errs()<<"\nEdge not added";
+                        //errs()<<"\nLine number 13 :"<<(dyn_cast<Instruction>(srcNode.name))->getDebugLoc().getLine()<<"\n";
+                        //flowEdge.location=(dyn_cast<Instruction>(srcNode.name))->getDebugLoc();
+                        //HeapOFGraph.flows.insert(flowEdge);
+                        }
                     }
                 }
             }
@@ -1877,16 +1727,7 @@ namespace {
 
         }
         void addDereference(BasicBlock &B, Instruction &I) {
-            //errs()<<"\n Dereference instruction handler\n";
-            //I.dump();
-            //errs()<<"...................\n";
-            //errs()<<"\nThe instruction is: ";
-            //I.dump();
-            //errs()<<"\n This is a dereference of : ";
-            //LoadInst *ld = dyn_cast<LoadInst>(&I);
-            //ld->getOperand(0)->dump();
-            //errs()<<"\n...........\n";
-            //To do: If 
+        
         }
         void addLoadToKnownDereference(BasicBlock &B, Instruction &I) {
             
@@ -1925,60 +1766,38 @@ namespace {
                 //    errs()<<"\nRepeat can be detected here";
                 } else {
                     FuncSummary summary;
-                    //errs()<<"\n this is happening : for function "<<I.getFunction()->getName()<<"\n";
-                    //for(Argument &A : I.getFunction()->args()) {
-                    //    Value* arg = dyn_cast<Value>(&A);
-                    //    if(arg == destNode.name) {
-                    //        errs()<<"\n it comes here and does: \n";
-                    ////if(isa<Argument>(destNode.name)) {
-                    //   // errs()<<"\nhead is an arg in store\n";
-                    //    summary.funcName = I.getFunction();
-                    //    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
-                    //        fsit = allFuncSummaries.find(summary);
-                    //    //    fsit->argTransforms.push_back(allocator);
-                    //    //    errs()<<fsit->argTransforms.size()<<"size\n";
-                    //        argTransformIt = fsit->argTransforms.begin();
-                    //        errs()<<"The index of arg transform 4: "<<dyn_cast<Argument>(arg)->getArgNo()<<"\n";
-                    //        advance(argTransformIt,(dyn_cast<Argument>(arg))->getArgNo());
-                    //        fsit->argTransforms.insert(argTransformIt,deallocator);
-                    //    }
-                    //    break;
-                    //}
-                    //}
                     if(isa<GlobalVariable>(destNode.name)) {
                         summary.funcName = I.getFunction();
                         if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
                             fsit = allFuncSummaries.find(summary);
-                            //Value *v = dyn_cast<Value>(storIns->getOperand(1));
                             fsit->globalAlloc.insert(dyn_cast<Value>(storIns));
-                            //errs()<<"\nglobal value allocated for function : "<<I.getFunction()->getName();
                         }
                     }
-                    //if(isa<Argument>(srcNode.name)) {
                     for(Argument &A : I.getFunction()->args()) {
                         Value* arg = dyn_cast<Value>(&A);
                         if(arg == srcNode.name) {
-                        //errs()<<"\n source node of store is argument";
                         break;
                     }
                     }
-                    //    }
-                    //}
-                    //errs()<<fsit->argTransforms.size()<<"size\n";
                     annotateEdge(flowEdge,I);
                     flowEdge.location=I.getDebugLoc();
+                    //errs()<<"Line number 14 "<<I.getDebugLoc().getLine();
                     HeapOFGraph.flows.insert(flowEdge);
                 }
             }
         }
         void addReturn(BasicBlock &B, Instruction &I) {
             Function *F=I.getFunction();
-            if(F->hasMetadata("summary")) {
-                FuncSummary summary;
-                summary.funcName=F;
-                if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
-                    fsit = allFuncSummaries.find(summary);
-                    fsit->returnValues.insert(dyn_cast<Value>(I.getOperand(0)));
+            V retNode;
+            retNode.name = dyn_cast<Value>(I.getOperand(0));
+            if(HeapOFGraph.vertices.find(retNode) != HeapOFGraph.vertices.end()) {
+                if(F->hasMetadata("summary")) {
+                    FuncSummary summary;
+                    summary.funcName=F;
+                    if(allFuncSummaries.find(summary)!=allFuncSummaries.end()) {
+                        fsit = allFuncSummaries.find(summary);
+                        fsit->returnValues.insert(dyn_cast<Value>(I.getOperand(0)));
+                    }
                 }
             }
 
@@ -2016,6 +1835,7 @@ namespace {
                             flowEdge.head=formalArgNode;
                             annotateEdge(flowEdge,I);
                             flowEdge.location=I.getDebugLoc();
+                            //errs()<<"Line number 15 "<<I.getDebugLoc().getLine();
                             HeapOFGraph.flows.insert(flowEdge);
                         }
                         iterator++;
@@ -2030,7 +1850,6 @@ namespace {
                     applySummary(*Fun,*call);
                 }
             }
-            //applySummary(F,B,I); to be implemented
         }
         void applySummary(Function &F, CallInst &I) {
             //int argInx=0;
@@ -2049,49 +1868,52 @@ namespace {
                 summary=*fsit;
             }
             if(isa<PointerType>(*(summary.retType))) {
-            //    errs()<<"\nPtr type return value\n";
                 if(summary.functionType == allocator) {
                     //errs()<<"\nThis function allocates through return value";
                 }
             } else if(summary.functionType == allocator) {
-                //if(summary.argTransforms.size() > 0) {
-            //    errs()<<"\nArg transforms detected\n";
-                    for(funcType t: summary.argTransforms) {
-                        if(t==allocator) {
-                        //    errs()<<"\n Allocator of arg detected in function type allocator";
-                            //To do: add edge from formal arg to actual arg
-                        } else if (t==deallocator) {
-                        //    errs()<<"\nDeallocator of arg detected in function type allocator";
-                        } else if (t==noop) {
-                        //    errs()<<"\nnoop of arg detected in function type allocator";
-                        }
+                for(funcType t: summary.argTransforms) {
+                    if(t==allocator) {
+                    //    errs()<<"\n Allocator of arg detected in function type allocator";
+                        //To do: add edge from formal arg to actual arg
+                    } else if (t==deallocator) {
+                    //    errs()<<"\nDeallocator of arg detected in function type allocator";
+                    } else if (t==noop) {
+                    //    errs()<<"\nnoop of arg detected in function type allocator";
                     }
+                }
                 //}
             }
-            if(summary.argTransforms.size() > 0) {
-                //errs()<<"\nIn apply summary of the function for call: ";
-                //I.dump();
-                //errs()<<"\nArg transforms detected\n";
-                for(funcType t: summary.argTransforms) {
-                    if (t==deallocator) {
-                    //    errs()<<"\nDeallocator detected for args in "<<summary.funcName->getName();
-                        addDeallocArg(summary,I);
-                    } else if (t==allocator) {
-                        addAllocArg(summary,I);
+            //if(summary.argTransforms.size() > 0) {
+            //    //errs()<<"\nArg transforms is there for :";
+            //    //I.dump();
+            //    for(funcType t: summary.argTransforms) {
+            //        if (t==deallocator) {
+            //            addDeallocArg(summary,I);
+            //        } else if (t==allocator) {
+            //            addAllocArg(summary,I);
+            //        }
+            //    }
+            //}
+            if(summary.argumentTransform.size()>0) {
+                for(argTransform agt : summary.argumentTransform) {
+                    if(agt.typeOfTransform == allocator) {
+                        addAllocArg(summary,I,agt);
+                    } else if (agt.typeOfTransform == deallocator) {
+                        addDeallocArg(summary,I,agt);
                     }
                 }
             }
             if(summary.globalAlloc.size() > 0) {
                 addGlobalAlloc(summary.globalAlloc,I);
-            //    errs()<<"\nglobal value is allocated";
             }
             if(summary.globalDealloc.size() > 0) {
                 addGlobalDealloc(summary.globalDealloc,I);
-            //    errs()<<"\nglobal value is deallocated";
             }
-            if(summary.returnValues.size() > 0) {
+            if(summary.returnValues.size() > 0 && summary.functionType == allocator) {
+                //errs()<<"\nAdding return to call site";
+                //I.dump();
                 addReturnToCallSite(I,fsit);
-            //    errs()<<"\nPointer type return values detected";
             }
         }
         void addReturnToCallSite(CallInst &I,std::set<FuncSummary>::iterator fsit ) {
@@ -2109,19 +1931,18 @@ namespace {
                 retNode.name=ret;
                 if(HeapOFGraph.vertices.find(retNode) != HeapOFGraph.vertices.end()) {
                     retNode=*(HeapOFGraph.vertices.find(retNode));
+                    F flowEdge;
+                    flowEdge.head=receiverNode;
+                    flowEdge.tail=retNode;
+                    annotateEdge(flowEdge,I);
+                    flowEdge.location=I.getDebugLoc();
+                    //errs()<<"Line number 16 "<<I.getDebugLoc().getLine();
+                    HeapOFGraph.flows.insert(flowEdge);
                 }
             }
-            F flowEdge;
-            flowEdge.head=receiverNode;
-            flowEdge.tail=retNode;
-            annotateEdge(flowEdge,I);
-            flowEdge.location=I.getDebugLoc();
-            HeapOFGraph.flows.insert(flowEdge);
+            
         }
         void addGlobalDealloc(std::set<Value*> deallocSet, Instruction &I) {
-            //errs()<<"Global dealloc detected: ";
-            //Value *dealloc=*deallocSet.begin();
-            //dealloc->dump();
             for(Value *deallocIns : deallocSet) {
                 V freeNode,globalNode;
                 freeNode.name=deallocIns;
@@ -2138,13 +1959,11 @@ namespace {
                 flowEdge.tail=globalNode;
                 annotateEdge(flowEdge,I);
                 flowEdge.location=I.getDebugLoc();
+                //errs()<<"Line number 17 "<<I.getDebugLoc().getLine();
                 HeapOFGraph.flows.insert(flowEdge);
             }
         }
         void addGlobalAlloc(std::set<Value*> allocSet, Instruction &I) {
-            //errs()<<"Global alloc detected: ";
-            //Value *alloc=*allocSet.begin();
-            //alloc->dump();
             for(Value *allocIns : allocSet) {
                 V globalNode,ptrNode,objNode;
                 F flowEdge1,flowEdge2;
@@ -2168,28 +1987,74 @@ namespace {
                         flowEdge1.head=ptrNode;
                         annotateEdge(flowEdge1,I);
                         flowEdge1.location=I.getDebugLoc();
+                        //errs()<<"Line number 18 "<<I.getDebugLoc().getLine();
                         HeapOFGraph.flows.insert(flowEdge1);
                         flowEdge2.tail=ptrNode;
                         flowEdge2.head=globalNode;
                         annotateEdge(flowEdge2,I);
                         flowEdge2.location=I.getDebugLoc();
+                        //errs()<<"Line number 19 "<<I.getDebugLoc().getLine();
                         HeapOFGraph.flows.insert(flowEdge2);
                     }
                 }
             }
         }
-        void addDeallocArg(FuncSummary summary, Instruction &I) {
-            //errs()<<"\n Adding dealloc of summary";
+        void addDeallocArg(FuncSummary summary, Instruction &I, argTransform agt) {
+            CallInst *call=dyn_cast<CallInst>(&I);
+            Function *calledFunction = dyn_cast<Function>(call->getCalledFunction());
+            Value *A = call->getArgOperand(agt.argumentNumber);
+            V argNode,ptrNode;
+            F flowEdge;
+            argNode.name=A;
+            argNode.vertexTy=ptr;
+            //if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
+            //    argNode=*(HeapOFGraph.vertices.find(argNode));
+            //} else {
+            //    HeapOFGraph.vertices.insert(argNode);
+            //    argNode=*(HeapOFGraph.vertices.find(argNode));
+            //}
+            Argument *formalArg = calledFunction->getArg(agt.argumentNumber);
+            ptrNode.name=dyn_cast<Value>(formalArg);
+            ptrNode.vertexTy=ptr;
+            flowEdge.head=ptrNode;
+            flowEdge.tail=argNode;
+            annotateEdge(flowEdge,I);
+            flowEdge.location=I.getDebugLoc();
+            HeapOFGraph.flows.insert(flowEdge);
+        }
+        void addAllocArg(FuncSummary summary, Instruction &I, argTransform agt) {
+            CallInst *call=dyn_cast<CallInst>(&I);
+            Function *calledFunction = dyn_cast<Function>(call->getCalledFunction());
+            Value *A = call->getArgOperand(agt.argumentNumber);
+            V argNode,ptrNode;
+            F flowEdge;
+            argNode.name=A;
+            argNode.vertexTy=ptr;
+            //if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
+            //    argNode=*(HeapOFGraph.vertices.find(argNode));
+            //} else {
+            //    HeapOFGraph.vertices.insert(argNode);
+            //    argNode=*(HeapOFGraph.vertices.find(argNode));
+            //}
+            Argument *formalArg = calledFunction->getArg(agt.argumentNumber);
+            ptrNode.name=dyn_cast<Value>(formalArg);
+            ptrNode.vertexTy=ptr;
+            flowEdge.tail=ptrNode;
+            flowEdge.head=argNode;
+            annotateEdge(flowEdge,I);
+            flowEdge.location=I.getDebugLoc();
+            if(HeapOFGraph.flows.insert(flowEdge).second) {
+            }
+        }
+        void addDeallocArg2(FuncSummary summary, Instruction &I) {
             int argNumber=0;
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *calledFunction = dyn_cast<Function>(call->getCalledFunction());
             for(funcType t: summary.argTransforms) {
                 
                 if (t==deallocator) {
-                //    errs()<<"\nDeallocator edges to be added for "<<summary.funcName->getName();
+                    //errs()<<"\nDeallocator edges to be added for "<<summary.funcName->getName();
                     for (Value *A : call->args()) {
-                        //errs()<<"\n the arg that is going to be deallocated is : ";
-                        //A->dump();
                         V argNode,ptrNode;
                         F flowEdge;
                         argNode.name=A;
@@ -2197,88 +2062,52 @@ namespace {
                         if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
                             argNode=*(HeapOFGraph.vertices.find(argNode));
                         }
-                        //errs()<<"......\n";
-                        //errs()<<summary.argTransforms.size()<<"\n";
-                        //errs()<<"call->args and calledFunction->args size : and arg size is : " << argNumber<<"\n";
-                        //call->dump();
-                        //errs()<<"\n....\n";
-                        //calledFunction->dump();
-                        //errs()<<"\n.......\n";
-                        //errs()<<call->args().size()<<".....and ...."<<calledFunction->args().size();
-                        //errs()<<"\nSo an edge is to be added from this to ";
                         Argument *formalArg = calledFunction->getArg(argNumber);
-                        //formalArg->dump();
                         ptrNode.name=dyn_cast<Value>(formalArg);
                         ptrNode.vertexTy=ptr;
                         flowEdge.head=ptrNode;
                         flowEdge.tail=argNode;
                         annotateEdge(flowEdge,I);
                         flowEdge.location=I.getDebugLoc();
+                        //errs()<<"Line number 20 "<<I.getDebugLoc().getLine();
                         HeapOFGraph.flows.insert(flowEdge);
                     }
                 }
                 argNumber++;
             }
         }
-        void addAllocArg(FuncSummary summary, Instruction &I) {
+        void addAllocArg2(FuncSummary summary, Instruction &I) {
             int argNumber=0;
             CallInst *call=dyn_cast<CallInst>(&I);
             Function *calledFunction = dyn_cast<Function>(call->getCalledFunction());
             for(funcType t: summary.argTransforms) {
-                //errs()<<"\n here for :";
-                //I.dump();
-                //errs()<<"\n ..........................";
                 if (t==allocator) {
-                //    errs()<<"\nDeallocator edges to be added for "<<summary.funcName->getName();
                     for (Value *A : call->args()) {
                         V argNode,ptrNode;
                         F flowEdge;
                         argNode.name=A;
                         argNode.vertexTy=ptr;
-                        //errs()<<"\n the arg that is going to be allocated is : ";
-                        //A->dump();
                         if(HeapOFGraph.vertices.find(argNode) != HeapOFGraph.vertices.end()) {
                             argNode=*(HeapOFGraph.vertices.find(argNode));
-                        }
-                        //errs()<<"......\n";
-                        //errs()<<"\nSo an edge is to be added to this from ";
                         Argument *formalArg = calledFunction->getArg(argNumber);
-                        //formalArg->dump();
                         ptrNode.name=dyn_cast<Value>(formalArg);
                         ptrNode.vertexTy=ptr;
                         flowEdge.tail=ptrNode;
                         flowEdge.head=argNode;
                         annotateEdge(flowEdge,I);
                         flowEdge.location=I.getDebugLoc();
-                        HeapOFGraph.flows.insert(flowEdge);
+                        if(HeapOFGraph.flows.insert(flowEdge).second) {
+                        }
+                        }
                     }
+                } else if(t==deallocator){
+                    //errs()<<"\narg transform is a deallocator\n";
                 }
                 argNumber++;
             }
         }
         void traverseCallGraph(Module &M) {
-            //for (CallGraph::iterator CGI=CallGraph(M).begin(); CGI!=CallGraph(M).end(); CGI++) {
-            //for (auto &CGI : CallGraph(M)) {
-            //    errs()<<"\nlooped once";
-            //    if (const Function *F = CGI.first) {
-            //        errs()<<"\n Function name : "<<F->getName();
-            //        errs()<<"\n number of references : "<< CGI.second->getNumReferences();
-                    //for(auto &Vec : CGI.second->CalledFunctionsVector) 
-                    //errs()<<"\n Called funcitions vector "<< CGI.second->CalledFunctionsVector().size();
-                    //}
-                    //for (CalledFunctionsVector::iterator I = CGI.second->CalledFunctions.begin(); ; ++I) {
-                    //    errs()<<"\nThis works\n";
-                    //}
-                    //for(auto &I : (CGI.second)->CalledFunctionsVector()) {
-                    //    errs()<<"\n reached here";
-                    //}
-            //    } else {
-
-            //    }
-            //    errs()<<"\n.........................................\n";
-            //}
-            //errs()<<"\nDumping call graph\n";
-            //CallGraph(M).dump();
+            
         }
         void getAnalysisUsage(AnalysisUsage &AU) const override {
           AU.setPreservesAll();
